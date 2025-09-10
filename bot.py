@@ -15,7 +15,7 @@ reddit = praw.Reddit(
 subreddit_name = "ofcoursethatsasub"
 csv_file = "subreddit_refs.csv"
 
-# Load saved posts
+# --- Load saved posts ---
 saved_ids = set()
 oldest_timestamp = None
 if os.path.exists(csv_file):
@@ -30,7 +30,7 @@ if os.path.exists(csv_file):
             if oldest_timestamp is None or ts < oldest_timestamp:
                 oldest_timestamp = ts
 
-# Helpers
+# --- Helper functions ---
 def extract_refs(text):
     refs = []
     for word in text.split():
@@ -68,20 +68,21 @@ def fetch_pushshift(subreddit, before=None, size=500):
         return r.json().get("data", [])
     return []
 
-# --- Timed loop (~9 minutes) ---
+# --- Timed loop (run multiple batches until ~9 minutes) ---
 start_time = time.time()
 runtime = 9 * 60
 print("Bot started: fetching older posts incrementally.")
 
 while time.time() - start_time < runtime:
-    new_rows = []
+    batch_rows = []
+    batch_posts = fetch_pushshift(subreddit_name, before=oldest_timestamp, size=500)
 
-    posts = fetch_pushshift(subreddit_name, before=oldest_timestamp, size=500)
-    if not posts:
+    if not batch_posts:
         print("No more posts available from Pushshift this run.")
         break
 
-    for post in posts:
+    batch_oldest = oldest_timestamp
+    for post in batch_posts:
         post_id = post["id"]
         if post_id in saved_ids:
             continue
@@ -94,23 +95,24 @@ while time.time() - start_time < runtime:
 
         refs = extract_refs(submission.title + " " + submission.selftext)
         if refs:
-            new_rows.append([
+            batch_rows.append([
                 post_id,
                 submission.title,
                 ", ".join(refs),
                 int(submission.created_utc),
             ])
             saved_ids.add(post_id)
-            if oldest_timestamp is None or int(submission.created_utc) < oldest_timestamp:
-                oldest_timestamp = int(submission.created_utc)
 
-    if new_rows:
-        save_to_csv(new_rows)
-        print(f"Saved {len(new_rows)} new posts (total {len(saved_ids)}).")
+        post_ts = int(post["created_utc"])
+        if batch_oldest is None or post_ts < batch_oldest:
+            batch_oldest = post_ts
+
+    if batch_rows:
+        save_to_csv(batch_rows)
+        print(f"Saved {len(batch_rows)} posts in this batch (total {len(saved_ids)}).")
     else:
-        print("No new posts found this cycle.")
+        print("No new posts found in this batch.")
 
-    time.sleep(1)  # almost continuous
-
-print("Run finished.")
+    oldest_timestamp = batch_oldest
+    time.sleep(1)
 
