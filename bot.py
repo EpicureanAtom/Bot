@@ -4,12 +4,15 @@ import re
 import csv
 from datetime import datetime
 
-# Read environment variables (GitHub secrets)
-CLIENT_ID = os.getenv("CLIENT_ID")
-CLIENT_SECRET = os.getenv("CLIENT_SECRET")
-USERNAME = os.getenv("USERNAME")
-PASSWORD = os.getenv("PASSWORD")
-USER_AGENT = os.getenv("USER_AGENT", "").strip()
+- name: Run bot (10 minutes max)
+  env:
+    CLIENT_ID: ${{ secrets.CLIENT_ID }}
+    CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
+    USERNAME: ${{ secrets.USERNAME }}
+    PASSWORD: ${{ secrets.PASSWORD }}
+    USER_AGENT: ${{ secrets.USER_AGENT }}
+  run: timeout 600 python ./bot.py
+strip()
 
 if not all([CLIENT_ID, CLIENT_SECRET, USERNAME, PASSWORD, USER_AGENT]):
     raise ValueError("Missing Reddit credentials or user agent!")
