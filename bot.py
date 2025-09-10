@@ -11,11 +11,9 @@ USERNAME = os.getenv("USERNAME")
 PASSWORD = os.getenv("PASSWORD")
 USER_AGENT = os.getenv("USER_AGENT", "").strip()
 
-# Validate secrets
 if not all([CLIENT_ID, CLIENT_SECRET, USERNAME, PASSWORD, USER_AGENT]):
-    raise ValueError("One or more Reddit secrets are missing!")
+    raise ValueError("Missing Reddit credentials or user agent!")
 
-# Connect to Reddit
 reddit = praw.Reddit(
     client_id=CLIENT_ID,
     client_secret=CLIENT_SECRET,
@@ -33,10 +31,10 @@ existing_refs = set()
 if os.path.isfile(csv_file):
     with open(csv_file, newline="", encoding="utf-8") as f:
         reader = csv.reader(f)
-        next(reader, None)  # skip header
+        next(reader, None)
         for row in reader:
             if len(row) >= 3:
-                existing_refs.add((row[1], row[2]))  # (post_id, subreddit)
+                existing_refs.add((row[1], row[2]))
 
 # Create CSV with headers if missing
 if not os.path.isfile(csv_file):
@@ -47,7 +45,7 @@ if not os.path.isfile(csv_file):
 saved_count = len(existing_refs)
 print(f"Already saved: {saved_count} rows")
 
-# Stream new submissions indefinitely
+# Stream new submissions
 try:
     for submission in subreddit.stream.submissions(skip_existing=True):
         matches = pattern.findall(submission.title + " " + submission.selftext)
