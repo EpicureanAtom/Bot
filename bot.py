@@ -22,11 +22,12 @@ if os.path.exists(csv_file):
         reader = csv.reader(f)
         header = next(reader, None)
         for row in reader:
-            if row:
-                saved_ids.add(row[0])
-                ts = int(row[3])  # created_utc is column 4
-                if oldest_timestamp is None or ts < oldest_timestamp:
-                    oldest_timestamp = ts
+            if not row or len(row) < 4:  # skip incomplete/broken rows
+                continue
+            saved_ids.add(row[0])
+            ts = int(row[3])  # created_utc is column 4
+            if oldest_timestamp is None or ts < oldest_timestamp:
+                oldest_timestamp = ts
 
 def extract_refs(text):
     """Find subreddit mentions like r/example."""
@@ -45,8 +46,9 @@ def save_to_csv(rows):
             reader = csv.reader(f)
             header = next(reader, None)
             for row in reader:
-                if row:
-                    existing[row[0]] = row
+                if not row or len(row) < 4:
+                    continue
+                existing[row[0]] = row
 
     for row in rows:
         existing[row[0]] = row
@@ -75,6 +77,21 @@ for submission in posts:
         if oldest_timestamp is None or int(submission.created_utc) < oldest_timestamp:
             refs = extract_refs(submission.title + " " + submission.selftext)
             if refs:
+                new_rows.append([
+                    submission.id,
+                    submission.title,
+                    ", ".join(refs),
+                    int(submission.created_utc),
+                ])
+                processed += 1
+
+# Save
+if new_rows:
+    save_to_csv(new_rows)
+    print(f"Saved {len(new_rows)} new posts (total now {len(saved_ids) + len(new_rows)}).")
+else:
+    print("No new posts found this run.")
+
                 new_rows.append([
                     submission.id,
                     submission.title,
