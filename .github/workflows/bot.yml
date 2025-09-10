@@ -2,12 +2,13 @@ name: Run Reddit Bot
 
 on:
   schedule:
-    - cron: "*/30 * * * *"  # every 30 minutes
+    - cron: "*/30 * * * *"  # run every 30 minutes
   workflow_dispatch:        # allow manual runs
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
+
     steps:
       # Step 1: Checkout repository
       - name: Checkout repository
@@ -33,8 +34,8 @@ jobs:
           USER_AGENT: ${{ secrets.USER_AGENT }}
         run: python ./bot.py
 
-      # Step 5: Commit updated CSV back to GitHub
-      - name: Commit results
+      # Step 5: Commit updated CSV
+      - name: Commit CSV to repo
         run: |
           git config --global user.name "github-actions[bot]"
           git config --global user.email "github-actions[bot]@users.noreply.github.com"
@@ -42,7 +43,7 @@ jobs:
           git commit -m "Update subreddit references [skip ci]" || echo "No changes to commit"
           git push
 
-      # Step 6: Upload CSV as artifact
+      # Step 6: Upload CSV artifact
       - name: Upload CSV artifact
         uses: actions/upload-artifact@v4
         with:
