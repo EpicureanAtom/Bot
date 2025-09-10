@@ -3,7 +3,7 @@ name: Run Reddit Bot
 on:
   schedule:
     - cron: "*/30 * * * *"   # every 30 minutes
-  workflow_dispatch:         # allow manual run from GitHub
+  workflow_dispatch:         # allow manual run
 
 jobs:
   run-bot:
