@@ -1,0 +1,29 @@
+import praw
+import re
+import csv
+from datetime import datetime
+
+# Connect to Reddit
+reddit = praw.Reddit(
+    client_id="YOUR_CLIENT_ID",
+    client_secret="YOUR_CLIENT_SECRET",
+    user_agent="catalogue_bot by u/YOUR_USERNAME",
+)
+
+# Subreddit to monitor
+subreddit = reddit.subreddit("ofcoursethatsasub")
+
+# Regex pattern for r/subreddit mentions
+pattern = re.compile(r"(?:/r/|r/)([A-Za-z0-9_]+)")
+
+# Open CSV file
+with open("subreddit_refs.csv", "a", newline="", encoding="utf-8") as f:
+    writer = csv.writer(f)
+
+    # Stream new submissions
+    for submission in subreddit.stream.submissions(skip_existing=True):
+        matches = pattern.findall(submission.title + " " + submission.selftext)
+        if matches:
+            for match in matches:
+                writer.writerow([datetime.utcnow(), submission.id, match])
+                print(f"Found reference to r/{match} in post {submission.id}")
