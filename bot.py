@@ -54,3 +54,12 @@ try:
                     print(f"Saved r/{match} (total saved: {saved_count})")
 except Exception as e:
     print(f"Error occurred: {e}")
+
+- name: Commit results
+  run: |
+    git config --global user.name "github-actions[bot]"
+    git config --global user.email "github-actions[bot]@users.noreply.github.com"
+    git add subreddit_refs.csv
+    git commit -m "Update subreddit references [skip ci]" || echo "No changes to commit"
+    git push
+
