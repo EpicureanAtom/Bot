@@ -1,71 +1,88 @@
 import os
 import praw
-import re
 import csv
-from datetime import datetime
 
-- name: Run bot (10 minutes max)
-  env:
-    CLIENT_ID: ${{ secrets.CLIENT_ID }}
-    CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
-    USERNAME: ${{ secrets.USERNAME }}
-    PASSWORD: ${{ secrets.PASSWORD }}
-    USER_AGENT: ${{ secrets.USER_AGENT }}
-  run: timeout 600 python ./bot.py
-strip()
-
-if not all([CLIENT_ID, CLIENT_SECRET, USERNAME, PASSWORD, USER_AGENT]):
-    raise ValueError("Missing Reddit credentials or user agent!")
-
+# Set up Reddit API connection using GitHub secrets
 reddit = praw.Reddit(
-    client_id=CLIENT_ID,
-    client_secret=CLIENT_SECRET,
-    username=USERNAME,
-    password=PASSWORD,
-    user_agent=USER_AGENT
+    client_id=os.environ["CLIENT_ID"],
+    client_secret=os.environ["CLIENT_SECRET"],
+    username=os.environ["USERNAME"],
+    password=os.environ["PASSWORD"],
+    user_agent=os.environ["USER_AGENT"],
 )
 
+# Target subreddit
 subreddit = reddit.subreddit("ofcoursethatsasub")
-pattern = re.compile(r"(?:/r/|r/)([A-Za-z0-9_]+)")
+
 csv_file = "subreddit_refs.csv"
 
-# Load existing mentions to avoid duplicates
-existing_refs = set()
-if os.path.isfile(csv_file):
-    with open(csv_file, newline="", encoding="utf-8") as f:
+# Load already saved post IDs
+saved_ids = set()
+if os.path.exists(csv_file):
+    with open(csv_file, "r", newline="", encoding="utf-8") as f:
         reader = csv.reader(f)
-        next(reader, None)
+        next(reader, None)  # skip header
         for row in reader:
-            if len(row) >= 3:
-                existing_refs.add((row[1], row[2]))
+            if row:
+                saved_ids.add(row[0])
 
-# Create CSV with headers if missing
-if not os.path.isfile(csv_file):
-    with open(csv_file, "w", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
-        writer.writerow(["timestamp", "post_id", "mentioned_subreddit"])
+# Prepare to save results
+new_rows = []
 
-saved_count = len(existing_refs)
-print(f"Already saved: {saved_count} rows")
+def extract_refs(text):
+    """Find subreddit mentions like r/example."""
+    refs = []
+    for word in text.split():
+        if word.startswith("r/") and len(word) > 2:
+            refs.append(word.strip(",.?!"))
+    return refs
 
-# Stream new submissions
-try:
-    for submission in subreddit.stream.submissions(skip_existing=True):
-        matches = pattern.findall(submission.title + " " + submission.selftext)
-        new_entries = []
+# Fetch 50 newest posts
+for submission in subreddit.new(limit=50):
+    if submission.id not in saved_ids:
+        refs = extract_refs(submission.title + " " + submission.selftext)
+        if refs:
+            new_rows.append([submission.id, submission.title, ", ".join(refs)])
+            saved_ids.add(submission.id)
 
-        for match in matches:
-            key = (submission.id, match)
-            if key not in existing_refs:
-                existing_refs.add(key)
-                new_entries.append([datetime.utcnow(), submission.id, match])
-                saved_count += 1
-                print(f"Saved r/{match} (total saved: {saved_count})")
+# Fetch 50 older posts (skipping ones we already saved)
+older_count = 0
+for submission in subreddit.new(limit=200):  # scan deeper
+    if older_count >= 50:
+        break
+    if submission.id not in saved_ids:
+        refs = extract_refs(submission.title + " " + submission.selftext)
+        if refs:
+            new_rows.append([submission.id, submission.title, ", ".join(refs)])
+            saved_ids.add(submission.id)
+            older_count += 1
 
-        if new_entries:
-            with open(csv_file, "a", newline="", encoding="utf-8") as f:
-                writer = csv.writer(f)
-                writer.writerows(new_entries)
-                f.flush()
-except Exception as e:
-    print(f"Error occurred: {e}")
+# Save all data back into CSV (deduplicated)
+all_rows = []
+
+# Reload old rows
+if os.path.exists(csv_file):
+    with open(csv_file, "r", newline="", encoding="utf-8") as f:
+        reader = csv.reader(f)
+        header = next(reader, None)
+        for row in reader:
+            if row:
+                all_rows.append(row)
+
+# Append new rows
+all_rows.extend(new_rows)
+
+# Deduplicate by post ID
+unique = {}
+for row in all_rows:
+    unique[row[0]] = row
+
+# Write back to CSV
+with open(csv_file, "w", newline="", encoding="utf-8") as f:
+    writer = csv.writer(f)
+    writer.writerow(["id", "title", "subreddit_refs"])
+    for row in unique.values():
+        writer.writerow(row)
+
+print(f"Saved {len(new_rows)} new posts. Total now: {len(unique)}")
+
