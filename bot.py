@@ -23,3 +23,15 @@ with open("subreddit_refs.csv", "a", newline="", encoding="utf-8") as f:
             for match in matches:
                 writer.writerow([datetime.utcnow(), submission.id, match])
                 print(f"Found r/{match} in post {submission.id}")
+
+saved_count = 0  # counter
+
+for submission in subreddit.new(limit=50):
+    matches = pattern.findall(submission.title + " " + submission.selftext)
+    if matches:
+        with open(csv_file, "a", newline="", encoding="utf-8") as f:
+            writer = csv.writer(f)
+            for match in matches:
+                writer.writerow([datetime.utcnow(), submission.id, match])
+                saved_count += 1
+                print(f"Saved r/{match} (total saved: {saved_count})")
