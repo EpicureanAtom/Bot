@@ -1,6 +1,7 @@
 import os
 import praw
 import csv
+import time
 
 # Set up Reddit API connection using GitHub secrets
 reddit = praw.Reddit(
@@ -26,9 +27,6 @@ if os.path.exists(csv_file):
             if row:
                 saved_ids.add(row[0])
 
-# Prepare to save results
-new_rows = []
-
 def extract_refs(text):
     """Find subreddit mentions like r/example."""
     refs = []
@@ -37,52 +35,61 @@ def extract_refs(text):
             refs.append(word.strip(",.?!"))
     return refs
 
-# Fetch 50 newest posts
-for submission in subreddit.new(limit=50):
-    if submission.id not in saved_ids:
-        refs = extract_refs(submission.title + " " + submission.selftext)
-        if refs:
-            new_rows.append([submission.id, submission.title, ", ".join(refs)])
-            saved_ids.add(submission.id)
+def save_to_csv(new_rows):
+    """Append new rows to the CSV, deduplicating by post ID."""
+    all_rows = []
 
-# Fetch 50 older posts (skipping ones we already saved)
-older_count = 0
-for submission in subreddit.new(limit=200):  # scan deeper
-    if older_count >= 50:
-        break
-    if submission.id not in saved_ids:
-        refs = extract_refs(submission.title + " " + submission.selftext)
-        if refs:
-            new_rows.append([submission.id, submission.title, ", ".join(refs)])
-            saved_ids.add(submission.id)
-            older_count += 1
+    # Reload old rows
+    if os.path.exists(csv_file):
+        with open(csv_file, "r", newline="", encoding="utf-8") as f:
+            reader = csv.reader(f)
+            header = next(reader, None)
+            for row in reader:
+                if row:
+                    all_rows.append(row)
 
-# Save all data back into CSV (deduplicated)
-all_rows = []
+    # Append new rows
+    all_rows.extend(new_rows)
 
-# Reload old rows
-if os.path.exists(csv_file):
-    with open(csv_file, "r", newline="", encoding="utf-8") as f:
-        reader = csv.reader(f)
-        header = next(reader, None)
-        for row in reader:
-            if row:
-                all_rows.append(row)
+    # Deduplicate by post ID
+    unique = {}
+    for row in all_rows:
+        unique[row[0]] = row
 
-# Append new rows
-all_rows.extend(new_rows)
+    # Write back to CSV
+    with open(csv_file, "w", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        writer.writerow(["id", "title", "subreddit_refs"])
+        for row in unique.values():
+            writer.writerow(row)
 
-# Deduplicate by post ID
-unique = {}
-for row in all_rows:
-    unique[row[0]] = row
+start_time = time.time()
+batch_size = 50
+batch_count = 0
 
-# Write back to CSV
-with open(csv_file, "w", newline="", encoding="utf-8") as f:
-    writer = csv.writer(f)
-    writer.writerow(["id", "title", "subreddit_refs"])
-    for row in unique.values():
-        writer.writerow(row)
+print("Starting bot, will run until GitHub timeout (~10 min).")
 
-print(f"Saved {len(new_rows)} new posts. Total now: {len(unique)}")
+# Keep processing until GitHub kills the job (~600s)
+while time.time() - start_time < 550:  # ~9 minutes
+    new_rows = []
+    processed = 0
 
+    for submission in subreddit.new(limit=200):
+        if processed >= batch_size:
+            break
+        if submission.id not in saved_ids:
+            refs = extract_refs(submission.title + " " + submission.selftext)
+            if refs:
+                new_rows.append([submission.id, submission.title, ", ".join(refs)])
+                saved_ids.add(submission.id)
+                processed += 1
+
+    if new_rows:
+        save_to_csv(new_rows)
+        batch_count += 1
+        print(f"Batch {batch_count}: saved {len(new_rows)} posts (total saved: {len(saved_ids)})")
+    else:
+        print("No new posts found, waiting...")
+        time.sleep(30)  # wait before checking again
+
+print("Finished run.")
