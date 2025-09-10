@@ -69,30 +69,27 @@ print("Bot started. Running for ~9 minutes...")
 while time.time() - start_time < runtime:
     new_rows = []
 
-    # Fetch posts
+    # Fetch all posts available, then filter older than oldest_timestamp
     if oldest_timestamp is None:
-        posts = subreddit.new(limit=500)
+        posts = subreddit.new(limit=None)
     else:
         posts = subreddit.new(limit=None)
 
-    processed = 0
     for submission in posts:
-        if processed >= 500:  # process up to 500 posts per cycle
-            break
-        if submission.id not in saved_ids:
-            if oldest_timestamp is None or int(submission.created_utc) < oldest_timestamp:
-                refs = extract_refs(submission.title + " " + submission.selftext)
-                if refs:
-                    new_rows.append([
-                        submission.id,
-                        submission.title,
-                        ", ".join(refs),
-                        int(submission.created_utc),
-                    ])
-                    saved_ids.add(submission.id)
-                    if oldest_timestamp is None or int(submission.created_utc) < oldest_timestamp:
-                        oldest_timestamp = int(submission.created_utc)
-                    processed += 1
+        if submission.id in saved_ids:
+            continue
+        if oldest_timestamp is None or int(submission.created_utc) < oldest_timestamp:
+            refs = extract_refs(submission.title + " " + submission.selftext)
+            if refs:
+                new_rows.append([
+                    submission.id,
+                    submission.title,
+                    ", ".join(refs),
+                    int(submission.created_utc),
+                ])
+                saved_ids.add(submission.id)
+                if oldest_timestamp is None or int(submission.created_utc) < oldest_timestamp:
+                    oldest_timestamp = int(submission.created_utc)
 
     if new_rows:
         save_to_csv(new_rows)
