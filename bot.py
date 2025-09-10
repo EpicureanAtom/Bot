@@ -36,4 +36,26 @@ csv_file = "subreddit_refs.csv"
 # Create CSV with headers if it doesn't exist
 if not os.path.isfile(csv_file):
     with open(csv_file, "w", newline="", encoding="utf-8") as f:
-        writer = csv.write
+        writer = csv.writer(f)
+        writer.writerow(["timestamp", "post_id", "mentioned_subreddit"])
+
+# Count previously saved entries
+with open(csv_file, newline="", encoding="utf-8") as f:
+    saved_count = sum(1 for row in f) - 1  # subtract header
+
+print(f"Already saved: {saved_count} rows")
+
+# Fetch newest 50 submissions and write matches to CSV
+try:
+    for submission in subreddit.new(limit=50):
+        matches = pattern.findall(submission.title + " " + submission.selftext)
+        if matches:
+            with open(csv_file, "a", newline="", encoding="utf-8") as f:
+                writer = csv.writer(f)  # correct usage
+                for match in matches:
+                    writer.writerow([datetime.utcnow(), submission.id, match])
+                    f.flush()  # ensure it writes immediately
+                    saved_count += 1
+                    print(f"Saved r/{match} (total saved: {saved_count})")
+except Exception as e:
+    print(f"Error occurred: {e}")
