@@ -1,8 +1,9 @@
 import os
 import praw
 import csv
+import time
 
-# Set up Reddit API connection
+# --- Reddit API connection ---
 reddit = praw.Reddit(
     client_id=os.environ["CLIENT_ID"],
     client_secret=os.environ["CLIENT_SECRET"],
@@ -14,7 +15,7 @@ reddit = praw.Reddit(
 subreddit = reddit.subreddit("ofcoursethatsasub")
 csv_file = "subreddit_refs.csv"
 
-# Load already saved posts
+# --- Load already saved posts ---
 saved_ids = set()
 oldest_timestamp = None
 if os.path.exists(csv_file):
@@ -29,7 +30,7 @@ if os.path.exists(csv_file):
             if oldest_timestamp is None or ts < oldest_timestamp:
                 oldest_timestamp = ts
 
-
+# --- Helper functions ---
 def extract_refs(text):
     """Find subreddit mentions like r/example."""
     refs = []
@@ -38,11 +39,9 @@ def extract_refs(text):
             refs.append(word.strip(",.?!"))
     return refs
 
-
 def save_to_csv(rows):
     """Save rows to CSV, keeping old data."""
     existing = {}
-
     if os.path.exists(csv_file):
         with open(csv_file, "r", newline="", encoding="utf-8") as f:
             reader = csv.reader(f)
@@ -61,36 +60,46 @@ def save_to_csv(rows):
         for row in existing.values():
             writer.writerow(row)
 
+# --- Timed loop (runs ~9 minutes) ---
+start_time = time.time()
+runtime = 9 * 60  # 9 minutes
 
-# Collect new rows
-new_rows = []
+print("Bot started. Running for ~9 minutes...")
 
-if oldest_timestamp is None:
-    print("No saved data yet. Fetching newest posts...")
-    posts = subreddit.new(limit=500)
-else:
-    print(f"Fetching posts older than {oldest_timestamp}...")
-    posts = subreddit.new(limit=None)  # fetch many, then filter manually
+while time.time() - start_time < runtime:
+    new_rows = []
 
-processed = 0
-for submission in posts:
-    if processed >= 500:  # batch size per run
-        break
-    if submission.id not in saved_ids:
-        if oldest_timestamp is None or int(submission.created_utc) < oldest_timestamp:
-            refs = extract_refs(submission.title + " " + submission.selftext)
-            if refs:
-                new_rows.append([
-                    submission.id,
-                    submission.title,
-                    ", ".join(refs),
-                    int(submission.created_utc),
-                ])
-                processed += 1
+    # Fetch posts
+    if oldest_timestamp is None:
+        posts = subreddit.new(limit=500)
+    else:
+        posts = subreddit.new(limit=None)
 
-# Save
-if new_rows:
-    save_to_csv(new_rows)
-    print(f"Saved {len(new_rows)} new posts (total now {len(saved_ids) + len(new_rows)}).")
-else:
-    print("No new posts found this run.")
+    processed = 0
+    for submission in posts:
+        if processed >= 500:  # process up to 500 posts per cycle
+            break
+        if submission.id not in saved_ids:
+            if oldest_timestamp is None or int(submission.created_utc) < oldest_timestamp:
+                refs = extract_refs(submission.title + " " + submission.selftext)
+                if refs:
+                    new_rows.append([
+                        submission.id,
+                        submission.title,
+                        ", ".join(refs),
+                        int(submission.created_utc),
+                    ])
+                    saved_ids.add(submission.id)
+                    if oldest_timestamp is None or int(submission.created_utc) < oldest_timestamp:
+                        oldest_timestamp = int(submission.created_utc)
+                    processed += 1
+
+    if new_rows:
+        save_to_csv(new_rows)
+        print(f"Cycle complete: saved {len(new_rows)} new posts (total {len(saved_ids)}).")
+    else:
+        print("Cycle complete: no new posts found.")
+
+    time.sleep(1)  # wait 1 second before next cycle
+
+print("Run finished.")
