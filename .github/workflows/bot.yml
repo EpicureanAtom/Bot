@@ -9,17 +9,21 @@ jobs:
   run-bot:
     runs-on: ubuntu-latest
     steps:
+      # Step 1: Checkout repository
       - name: Checkout repository
         uses: actions/checkout@v3
 
+      # Step 2: Set up Python
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: "3.10"
 
+      # Step 3: Install dependencies
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      # Step 4: Run bot
       - name: Run bot
         env:
           CLIENT_ID: ${{ secrets.CLIENT_ID }}
@@ -29,7 +33,7 @@ jobs:
           USER_AGENT: ${{ secrets.USER_AGENT }}
         run: python ./bot.py
 
-      # Commit updated CSV back to GitHub
+      # Step 5: Commit updated CSV back to GitHub
       - name: Commit results
         run: |
           git config --global user.name "github-actions[bot]"
@@ -38,9 +42,9 @@ jobs:
           git commit -m "Update subreddit references [skip ci]" || echo "No changes to commit"
           git push
 
-      # Upload CSV as artifact so you can download it anytime
+      # Step 6: Upload CSV as artifact
       - name: Upload CSV artifact
-        uses: actions/upload-artifact@v3
+        uses: actions/upload-artifact@v4
         with:
           name: subreddit_refs
           path: subreddit_refs.csv
