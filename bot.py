@@ -1,9 +1,8 @@
 import os
 import praw
 import csv
-import time
 
-# Set up Reddit API connection using GitHub secrets
+# Set up Reddit API connection
 reddit = praw.Reddit(
     client_id=os.environ["CLIENT_ID"],
     client_secret=os.environ["CLIENT_SECRET"],
@@ -12,20 +11,22 @@ reddit = praw.Reddit(
     user_agent=os.environ["USER_AGENT"],
 )
 
-# Target subreddit
 subreddit = reddit.subreddit("ofcoursethatsasub")
-
 csv_file = "subreddit_refs.csv"
 
-# Load already saved post IDs
+# Load already saved posts
 saved_ids = set()
+oldest_timestamp = None
 if os.path.exists(csv_file):
     with open(csv_file, "r", newline="", encoding="utf-8") as f:
         reader = csv.reader(f)
-        next(reader, None)  # skip header
+        header = next(reader, None)
         for row in reader:
             if row:
                 saved_ids.add(row[0])
+                ts = int(row[3])  # created_utc is column 4
+                if oldest_timestamp is None or ts < oldest_timestamp:
+                    oldest_timestamp = ts
 
 def extract_refs(text):
     """Find subreddit mentions like r/example."""
@@ -35,61 +36,57 @@ def extract_refs(text):
             refs.append(word.strip(",.?!"))
     return refs
 
-def save_to_csv(new_rows):
-    """Append new rows to the CSV, deduplicating by post ID."""
-    all_rows = []
+def save_to_csv(rows):
+    """Save rows to CSV, keeping old data."""
+    existing = {}
 
-    # Reload old rows
     if os.path.exists(csv_file):
         with open(csv_file, "r", newline="", encoding="utf-8") as f:
             reader = csv.reader(f)
             header = next(reader, None)
             for row in reader:
                 if row:
-                    all_rows.append(row)
+                    existing[row[0]] = row
 
-    # Append new rows
-    all_rows.extend(new_rows)
+    for row in rows:
+        existing[row[0]] = row
 
-    # Deduplicate by post ID
-    unique = {}
-    for row in all_rows:
-        unique[row[0]] = row
-
-    # Write back to CSV
     with open(csv_file, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
-        writer.writerow(["id", "title", "subreddit_refs"])
-        for row in unique.values():
+        writer.writerow(["id", "title", "subreddit_refs", "created_utc"])
+        for row in existing.values():
             writer.writerow(row)
 
-start_time = time.time()
-batch_size = 50
-batch_count = 0
+# Collect new rows
+new_rows = []
 
-print("Starting bot, will run until GitHub timeout (~10 min).")
+if oldest_timestamp is None:
+    print("No saved data yet. Fetching newest posts...")
+    posts = subreddit.new(limit=500)
+else:
+    print(f"Fetching posts older than {oldest_timestamp}...")
+    posts = subreddit.new(limit=None)  # fetch many, then filter manually
 
-# Keep processing until GitHub kills the job (~600s)
-while time.time() - start_time < 550:  # ~9 minutes
-    new_rows = []
-    processed = 0
-
-    for submission in subreddit.new(limit=200):
-        if processed >= batch_size:
-            break
-        if submission.id not in saved_ids:
+processed = 0
+for submission in posts:
+    if processed >= 500:  # batch size per run
+        break
+    if submission.id not in saved_ids:
+        if oldest_timestamp is None or int(submission.created_utc) < oldest_timestamp:
             refs = extract_refs(submission.title + " " + submission.selftext)
             if refs:
-                new_rows.append([submission.id, submission.title, ", ".join(refs)])
-                saved_ids.add(submission.id)
+                new_rows.append([
+                    submission.id,
+                    submission.title,
+                    ", ".join(refs),
+                    int(submission.created_utc),
+                ])
                 processed += 1
 
-    if new_rows:
-        save_to_csv(new_rows)
-        batch_count += 1
-        print(f"Batch {batch_count}: saved {len(new_rows)} posts (total saved: {len(saved_ids)})")
-    else:
-        print("No new posts found, waiting...")
-        time.sleep(30)  # wait before checking again
+# Save
+if new_rows:
+    save_to_csv(new_rows)
+    print(f"Saved {len(new_rows)} new posts (total now {len(saved_ids) + len(new_rows)}).")
+else:
+    print("No new posts found this run.")
 
-print("Finished run.")
