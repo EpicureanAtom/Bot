@@ -1,25 +1,30 @@
-name: Run Bot
+name: Run Reddit Bot
 
 on:
   schedule:
-    - cron: "*/30 * * * *"  # every 30 minutes
-  workflow_dispatch:        # allows manual run
+    - cron: "*/30 * * * *"  # runs every 30 minutes
+  workflow_dispatch:        # allows manual run from Actions tab
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Checkout code
+      # Step 1: Checkout the repository
+      - name: Checkout repository
         uses: actions/checkout@v3
 
+      # Step 2: Set up Python
       - name: Set up Python
         uses: actions/setup-python@v4
         with:
           python-version: "3.10"
 
+      # Step 3: Install dependencies
       - name: Install dependencies
         run: pip install -r requirements.txt
+
+      # Step 4: Run the bot
       - name: Run bot
         env:
           CLIENT_ID: ${{ secrets.CLIENT_ID }}
@@ -27,8 +32,9 @@ jobs:
           USERNAME: ${{ secrets.USERNAME }}
           PASSWORD: ${{ secrets.PASSWORD }}
           USER_AGENT: ${{ secrets.USER_AGENT }}
-        run: python bot.py
+        run: python ./bot.py
 
+      # Step 5: Commit CSV results
       - name: Commit results
         run: |
           git config --global user.name "github-actions[bot]"
