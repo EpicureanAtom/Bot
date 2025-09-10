@@ -1,4 +1,4 @@
-name: Run Reddit Bot
+name: Run Bot
 
 on:
   schedule:
