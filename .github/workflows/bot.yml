@@ -2,50 +2,44 @@ name: Run Reddit Bot
 
 on:
   schedule:
-    - cron: "*/30 * * * *"  # run every 30 minutes
-  workflow_dispatch:        # allow manual runs
+    - cron: "*/30 * * * *"   # run every 30 minutes
+  workflow_dispatch:          # allow manual run from GitHub
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
 
     steps:
-      # Step 1: Checkout repository
-      - name: Checkout repository
-        uses: actions/checkout@v3
+    - name: Checkout code
+      uses: actions/checkout@v4
 
-      # Step 2: Set up Python
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: "3.10"
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.10"
 
-      # Step 3: Install dependencies
-      - name: Install dependencies
-        run: pip install -r requirements.txt
+    - name: Install dependencies
+      run: pip install praw
 
-      # Step 4: Run bot
-      - name: Run bot
-        env:
-          CLIENT_ID: ${{ secrets.CLIENT_ID }}
-          CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
-          USERNAME: ${{ secrets.USERNAME }}
-          PASSWORD: ${{ secrets.PASSWORD }}
-          USER_AGENT: ${{ secrets.USER_AGENT }}
-        run: python ./bot.py
+    - name: Run bot (max 10 minutes)
+      env:
+        CLIENT_ID: ${{ secrets.CLIENT_ID }}
+        CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
+        USERNAME: ${{ secrets.USERNAME }}
+        PASSWORD: ${{ secrets.PASSWORD }}
+        USER_AGENT: ${{ secrets.USER_AGENT }}
+      run: timeout 600 python ./bot.py
 
-      # Step 5: Commit updated CSV
-      - name: Commit CSV to repo
-        run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add subreddit_refs.csv
-          git commit -m "Update subreddit references [skip ci]" || echo "No changes to commit"
-          git push
+    - name: Commit results
+      run: |
+        git config --global user.name "github-actions[bot]"
+        git config --global user.email "github-actions[bot]@users.noreply.github.com"
+        git add subreddit_refs.csv
+        git commit -m "Update subreddit references [skip ci]" || echo "No changes to commit"
+        git push
 
-      # Step 6: Upload CSV artifact
-      - name: Upload CSV artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: subreddit_refs
-          path: subreddit_refs.csv
+    - name: Upload CSV as artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: subreddit-refs
+        path: subreddit_refs.csv
