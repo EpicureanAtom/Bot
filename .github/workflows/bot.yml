@@ -2,8 +2,8 @@ name: Run Reddit Bot
 
 on:
   schedule:
-    - cron: "*/30 * * * *"   # every 30 minutes
-  workflow_dispatch:         # allow manual run
+    - cron: "*/30 * * * *"  # every 30 minutes
+  workflow_dispatch:        # allows manual run
 
 jobs:
   run-bot:
@@ -20,7 +20,6 @@ jobs:
 
       - name: Install dependencies
         run: pip install -r requirements.txt
-
       - name: Run bot
         env:
           CLIENT_ID: ${{ secrets.CLIENT_ID }}
