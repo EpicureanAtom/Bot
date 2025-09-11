@@ -1,4 +1,4 @@
-nname: Continuous Reddit Bot
+name: Continuous Reddit Bot
 
 on:
   workflow_dispatch:          # manual trigger
