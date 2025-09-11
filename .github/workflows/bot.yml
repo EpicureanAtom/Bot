@@ -1,42 +1,45 @@
 name: Continuous Reddit Bot
 
 on:
-  workflow_dispatch:         # allow manual runs
+  workflow_dispatch:         # manual runs allowed
   schedule:
-    - cron: "*/30 * * * *"   # run every 30 minutes (optional)
+    - cron: "*/30 * * * *"   # run every 30 minutes
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
 
     steps:
-      # 1️⃣ Checkout repository
-      - name: Checkout repository
-        uses: actions/checkout@v3
+    - name: Checkout repository
+      uses: actions/checkout@v3
 
-      # 2️⃣ Set up Python
-      - name: Set up Python
-        uses: actions/setup-python@v4
-        with:
-          python-version: "3.10"
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.10"
 
-      # 3️⃣ Install dependencies
-      - name: Install dependencies
-        run: pip install praw requests
+    - name: Install dependencies
+      run: pip install praw requests
 
-      # 4️⃣ Run bot continuously
-      - name: Run bot
-        env:
-          CLIENT_ID: ${{ secrets.CLIENT_ID }}
-          CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
-          USERNAME: ${{ secrets.USERNAME }}
-          PASSWORD: ${{ secrets.PASSWORD }}
-          USER_AGENT: ${{ secrets.USER_AGENT }}
-        run: python ./bot.py
+    - name: Run bot (~10 minutes)
+      env:
+        CLIENT_ID: ${{ secrets.CLIENT_ID }}
+        CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
+        USERNAME: ${{ secrets.USERNAME }}
+        PASSWORD: ${{ secrets.PASSWORD }}
+        USER_AGENT: ${{ secrets.USER_AGENT }}
+      run: timeout 600 python ./bot.py
 
-      # 5️⃣ Upload CSV artifact
-      - name: Upload CSV artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: subreddit-refs
-          path: subreddit_reffs.csv
+    - name: Commit updated CSV
+      run: |
+        git config --global user.name "github-actions[bot]"
+        git config --global user.email "github-actions[bot]@users.noreply.github.com"
+        git add subreddit_reffs.csv
+        git commit -m "Update subreddit_reffs.csv [auto]" || echo "No changes to commit"
+        git push
+
+    - name: Upload CSV artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: subreddit-refs
+        path: subreddit_reffs.csv
