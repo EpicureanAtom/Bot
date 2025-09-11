@@ -33,18 +33,18 @@ jobs:
 
     - name: Commit updated CSV
       run: |
-        # Configure Git
-        git config --global user.name EpicureanAtom
-        git config --global user.email miloradovicdragutin@gmail.com
-        
+        # Configure Git user
+        git config --global user.name "EpicureanAtom"
+        git config --global user.email "miloradovicdragutin@gmail.com"
+
+        # Pull first to prevent push conflicts
+        git pull --rebase --autostash || echo "No remote changes to pull"
+
         # Add CSV
         git add subreddit_refs.csv
 
-        # Commit changes (no error if nothing new)
+        # Commit changes (no error if nothing to commit)
         git commit -m "Update subreddit_refs.csv [auto]" || echo "No changes to commit"
-
-        # Pull remote changes safely
-        git pull --rebase --autostash || echo "No remote changes to rebase"
 
         # Push updates
         git push || echo "Push failed (might be no new changes)"
@@ -54,3 +54,4 @@ jobs:
       with:
         name: subreddit-refs
         path: subreddit_refs.csv
+
