@@ -6,7 +6,7 @@ import time
 import subprocess
 from datetime import datetime
 
-CSV_FILE = "subreddit_reffs.csv"  # <- new file for fresh start
+CSV_FILE = "subreddit_reffs.csv"  # new file for fresh start
 RUN_LIMIT = 600   # 10 minutes
 COMMIT_TIME = 540 # commit around 9 minutes
 
@@ -91,7 +91,7 @@ while True:
     # --- 1. Fetch new posts via Reddit API ---
     print(f"\n🔄 Cycle {cycle}: Checking for new posts...")
     for post in subreddit.new(limit=500):
-        if post.id not in seen_ids:
+        if post.id not in seen_ids and "r/ofcoursethatsasub" not in post.title.lower():
             new_rows.append([
                 post.id,
                 f"r/{post.subreddit.display_name}",
@@ -109,7 +109,7 @@ while True:
             if r.status_code == 200:
                 data = r.json().get("data", [])
                 for d in data:
-                    if d["id"] not in seen_ids:
+                    if d["id"] not in seen_ids and "r/ofcoursethatsasub" not in d["title"].lower():
                         new_rows.append([
                             d["id"],
                             f"r/{d['subreddit']}",
@@ -144,4 +144,3 @@ while True:
         break
 
     time.sleep(1)
-    
