@@ -5,10 +5,10 @@ import time
 from datetime import datetime
 import re
 
-CSV_FILE = "subreddit_refs2.csv"
-FRESH_START = False      # start fresh or continue
-RUN_LIMIT = 1800        # total run time in seconds (30 min)
-CYCLE_TIME = 260        # ~4:20 per cycle
+CSV_FILE = "subreddit_refs2.csv"  # <-- ensures CSV is subreddit_refs2.csv
+FRESH_START = False      # start fresh or continue from existing CSV
+RUN_LIMIT = 1800         # total run time in seconds (30 min)
+CYCLE_TIME = 260         # ~4:20 per cycle
 
 SUBREDDIT_NAME = "ofcoursethatsasub"
 SUB_PATTERN = re.compile(r"\br/([A-Za-z0-9_]+)\b")  # regex for subreddit mentions
@@ -17,8 +17,10 @@ SUB_PATTERN = re.compile(r"\br/([A-Za-z0-9_]+)\b")  # regex for subreddit mentio
 # File helpers
 # --------------------------
 def load_existing():
+    """Load existing CSV and return rows, seen post IDs, and oldest timestamp."""
     if not os.path.exists(CSV_FILE) or FRESH_START:
         return [], set(), None
+
     rows, ids = [], set()
     oldest = None
     with open(CSV_FILE, "r", encoding="utf-8") as f:
@@ -38,7 +40,7 @@ def load_existing():
     return rows, ids, oldest
 
 def save_csv(rows):
-    """Save CSV only."""
+    """Save CSV only to subreddit_refs2.csv"""
     with open(CSV_FILE, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
         writer.writerow(["post_id", "type", "context", "subreddit", "author", "timestamp"])
@@ -74,7 +76,14 @@ while True:
                 valid = [m for m in matches if m.lower() != SUBREDDIT_NAME.lower()]
                 if valid:
                     context = text[:200].replace("\n", " ")
-                    new_rows.append([d["id"], "post", context, f"r/{d['subreddit']}", d.get("author"), int(d["created_utc"])])
+                    new_rows.append([
+                        d["id"],
+                        "post",
+                        context,
+                        f"r/{d['subreddit']}",
+                        d.get("author"),
+                        int(d["created_utc"])
+                    ])
                     seen_ids.add(d["id"])
             if data:
                 oldest_seen = int(data[-1]["created_utc"])
@@ -82,7 +91,7 @@ while True:
     except Exception as e:
         print(f"⚠ Pushshift failed: {e}")
 
-    # Save CSV only
+    # Save CSV
     if new_rows:
         rows = new_rows + rows
         save_csv(rows)
