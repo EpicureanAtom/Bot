@@ -10,17 +10,27 @@ jobs:
     runs-on: ubuntu-latest
 
     steps:
+    # 1. Checkout repository
     - name: Checkout repository
       uses: actions/checkout@v3
 
+    # 2. Configure Git identity
+    - name: Configure Git user
+      run: |
+        git config --global user.name "EpicureanAtom"
+        git config --global user.email "miloradovicdragutin@gmail.com"
+
+    # 3. Set up Python
     - name: Set up Python
       uses: actions/setup-python@v4
       with:
         python-version: "3.10"
 
+    # 4. Install dependencies
     - name: Install dependencies
       run: pip install praw requests
 
+    # 5. Run the Python bot (30-minute max)
     - name: Run bot
       env:
         CLIENT_ID: ${{ secrets.CLIENT_ID }}
@@ -28,30 +38,27 @@ jobs:
         USERNAME: ${{ secrets.USERNAME }}
         PASSWORD: ${{ secrets.PASSWORD }}
         USER_AGENT: ${{ secrets.USER_AGENT }}
-      run: |
-        timeout 1800 python ./bot.py   # 30 minutes max
+      run: timeout 1800 python ./bot.py
 
+    # 6. Pull remote safely to avoid conflicts
+    - name: Pull remote safely
+      run: |
+        git reset --hard || echo "No local changes to reset"
+        git pull --rebase || echo "No remote changes to rebase"
+
+    # 7. Commit changes
     - name: Commit updated CSV
       run: |
-        # Configure Git user
-        git config --global user.name "EpicureanAtom"
-        git config --global user.email "miloradovicdragutin@gmail.com"
-
-        # Pull first to prevent push conflicts
-        git pull --rebase --autostash || echo "No remote changes to pull"
-
-        # Add CSV
         git add subreddit_refs.csv
-
-        # Commit changes (no error if nothing to commit)
         git commit -m "Update subreddit_refs.csv [auto]" || echo "No changes to commit"
 
-        # Push updates
-        git push || echo "Push failed (might be no new changes)"
+    # 8. Push updates
+    - name: Push updates
+      run: git push || echo "Push failed (might be no new changes)"
 
+    # 9. Upload CSV artifact
     - name: Upload CSV artifact
       uses: actions/upload-artifact@v4
       with:
         name: subreddit-refs
         path: subreddit_refs.csv
-
