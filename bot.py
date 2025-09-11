@@ -2,8 +2,8 @@ import os
 import praw
 import csv
 import time
-import requests
 
+# --- Reddit connection ---
 reddit = praw.Reddit(
     client_id=os.environ["CLIENT_ID"],
     client_secret=os.environ["CLIENT_SECRET"],
@@ -15,9 +15,8 @@ reddit = praw.Reddit(
 subreddit_name = "ofcoursethatsasub"
 csv_file = "subreddit_refs.csv"
 
-# Load saved posts
+# --- Load saved posts ---
 saved_ids = set()
-oldest_timestamp = None
 if os.path.exists(csv_file):
     with open(csv_file, "r", newline="", encoding="utf-8") as f:
         reader = csv.reader(f)
@@ -26,10 +25,8 @@ if os.path.exists(csv_file):
             if not row or len(row) < 4:
                 continue
             saved_ids.add(row[0])
-            ts = int(row[3])
-            if oldest_timestamp is None or ts < oldest_timestamp:
-                oldest_timestamp = ts
 
+# --- Helper functions ---
 def extract_refs(text):
     refs = []
     for word in text.split():
@@ -55,67 +52,22 @@ def save_to_csv(rows):
         for row in existing.values():
             writer.writerow(row)
 
-def fetch_pushshift(subreddit, before=None, size=100):
-    url = "https://api.pushshift.io/reddit/submission/search/"
-    params = {"subreddit": subreddit, "size": size}
-    if before:
-        params["before"] = before
-    r = requests.get(url, params=params)
-    if r.status_code == 200:
-        return r.json().get("data", [])
-    return []
-
-start_time = time.time()
-runtime = 9 * 60
-print("Bot started: fetching older posts incrementally.")
-
-while time.time() - start_time < runtime:
-    batch_rows = []
-    batch_posts = fetch_pushshift(subreddit_name, before=oldest_timestamp, size=100)
-
-    if not batch_posts:
-        print("No posts returned by Pushshift. Waiting 2s and retrying...")
-        time.sleep(2)
-        continue  # retry until runtime ends
-
-    batch_oldest = oldest_timestamp
-    for post in batch_posts:
-        post_id = post["id"]
-        if post_id in saved_ids:
-            post_ts = int(post["created_utc"])
-            if batch_oldest is None or post_ts < batch_oldest:
-                batch_oldest = post_ts
-            continue
-
-        try:
-            submission = reddit.submission(id=post_id)
-        except Exception as e:
-            print(f"Error fetching {post_id}: {e}")
+# --- Main loop ---
+print("Bot started: monitoring for new posts...")
+try:
+    subreddit = reddit.subreddit(subreddit_name)
+    for submission in subreddit.stream.submissions(skip_existing=True):
+        if submission.id in saved_ids:
             continue
 
         refs = extract_refs(submission.title + " " + submission.selftext)
         if refs:
-            batch_rows.append([
-                post_id,
-                submission.title,
-                ", ".join(refs),
-                int(submission.created_utc),
-            ])
-            saved_ids.add(post_id)
+            row = [submission.id, submission.title, ", ".join(refs), int(submission.created_utc)]
+            save_to_csv([row])
+            saved_ids.add(submission.id)
+            print(f"Saved post {submission.id} with {len(refs)} references.")
 
-        post_ts = int(post["created_utc"])
-        if batch_oldest is None or post_ts < batch_oldest:
-            batch_oldest = post_ts
+        time.sleep(1)  # small pause to avoid rate limits
 
-    if batch_rows:
-        save_to_csv(batch_rows)
-        print(f"Saved {len(batch_rows)} posts in this batch (total {len(saved_ids)}).")
-    else:
-        print("No new posts found in this batch.")
-
-    oldest_timestamp = batch_oldest
-    time.sleep(1)
-
-print("Run finished.")
-
-
+except KeyboardInterrupt:
+    print("Bot stopped manually.")
