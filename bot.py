@@ -9,9 +9,9 @@ from datetime import datetime
 # --------------------------
 # Configuration
 # --------------------------
-CSV_FILE = "subreddit_refs.csv"    # Change this to start fresh
+CSV_FILE = "subreddit_refs.csv"    # Change to start fresh
 SUBREDDIT_NAME = "ofcoursethatsasub"
-RUN_LIMIT = 600       # total runtime limit in seconds (10 min)
+RUN_LIMIT = 600       # total runtime in seconds (10 min)
 COMMIT_TIME = 540     # 9 min, when CSV is committed
 CYCLE_DURATION = 269  # 4 min 29 sec per cycle
 BACKFILL_SIZE = 100   # posts per batch for Pushshift
@@ -35,7 +35,6 @@ def save_rows(rows):
         return
     file_exists = os.path.isfile(CSV_FILE)
     
-    # Load existing CSV
     existing_lines = []
     if file_exists:
         with open(CSV_FILE, "r", encoding="utf-8") as f:
@@ -58,10 +57,15 @@ def load_existing():
         reader = csv.reader(f)
         next(reader, None)
         for row in reader:
+            if len(row) < 6:
+                continue
             ids.add(row[0])
-            ts = int(row[4])
-            if oldest is None or ts < oldest:
-                oldest = ts
+            try:
+                ts = int(row[4])
+                if oldest is None or ts < oldest:
+                    oldest = ts
+            except:
+                continue
     return ids, oldest
 
 def git_push():
@@ -105,24 +109,29 @@ while True:
 
     # --- 1. Fetch new submissions ---
     print(f"\n🔄 Cycle {cycle}: Fetching newest posts...")
-    for post in subreddit.new(limit=500):
-        if post.id in seen_ids:
-            continue
-        content = (post.title or "") + " " + (post.selftext or "")
-        mentions, snippets = extract_mentions_with_context(content)
-        if mentions:
-            new_rows.append([post.id, "submission", f"r/{post.subreddit.display_name}", " | ".join(snippets), int(post.created_utc), mentions])
-            seen_ids.add(post.id)
+    try:
+        for post in subreddit.new(limit=500):
+            if post.id in seen_ids:
+                continue
+            content = (post.title or "") + " " + (post.selftext or "")
+            mentions, snippets = extract_mentions_with_context(content)
+            if mentions:
+                new_rows.append([post.id, "submission", f"r/{post.subreddit.display_name}", " | ".join(snippets), int(post.created_utc), mentions])
+                seen_ids.add(post.id)
+    except Exception as e:
+        print(f"⚠ Error fetching new submissions: {e}")
 
     # --- 2. Fetch new comments ---
-    print("💬 Checking new comments...")
-    for comment in subreddit.stream.comments(skip_existing=True):
-        if comment.id in seen_ids:
-            continue
-        mentions, snippets = extract_mentions_with_context(comment.body or "")
-        if mentions:
-            new_rows.append([comment.id, "comment", f"r/{comment.subreddit.display_name}", " | ".join(snippets), int(comment.created_utc), mentions])
-            seen_ids.add(comment.id)
+    try:
+        for comment in subreddit.stream.comments(skip_existing=True):
+            if comment.id in seen_ids:
+                continue
+            mentions, snippets = extract_mentions_with_context(comment.body or "")
+            if mentions:
+                new_rows.append([comment.id, "comment", f"r/{comment.subreddit.display_name}", " | ".join(snippets), int(comment.created_utc), mentions])
+                seen_ids.add(comment.id)
+    except Exception as e:
+        print(f"⚠ Error fetching comments: {e}")
 
     # --- 3. Backfill older posts via Pushshift ---
     if oldest_seen:
@@ -130,28 +139,25 @@ while True:
         url = f"https://api.pushshift.io/reddit/submission/search/?subreddit={SUBREDDIT_NAME}&before={oldest_seen}&size={BACKFILL_SIZE}&sort=desc"
         try:
             r = requests.get(url, timeout=30)
-            if r.status_code == 200:
-                data = r.json().get("data", [])
-                for d in data:
-                    if d["id"] in seen_ids:
-                        continue
-                    content = (d.get("title") or "") + " " + (d.get("selftext") or "")
-                    mentions, snippets = extract_mentions_with_context(content)
-                    if mentions:
-                        new_rows.append([d["id"], "submission", f"r/{d['subreddit']}", " | ".join(snippets), int(d["created_utc"]), mentions])
-                        seen_ids.add(d["id"])
-                if data:
-                    oldest_seen = int(data[-1]["created_utc"])
+            r.raise_for_status()
+            data = r.json().get("data", [])
+            for d in data:
+                if d["id"] in seen_ids:
+                    continue
+                content = (d.get("title") or "") + " " + (d.get("selftext") or "")
+                mentions, snippets = extract_mentions_with_context(content)
+                if mentions:
+                    new_rows.append([d["id"], "submission", f"r/{d['subreddit']}", " | ".join(snippets), int(d["created_utc"]), mentions])
+                    seen_ids.add(d["id"])
+            if data:
+                oldest_seen = int(data[-1]["created_utc"])
         except Exception as e:
             print(f"⚠ Pushshift request failed: {e}")
 
     # --- 4. Save rows ---
-    if new_rows:
-        save_rows(new_rows)
-        print(f"💾 Saved {len(new_rows)} new rows. Total: {len(seen_ids)}")
-        git_push()
-    else:
-        print("✅ No new rows this cycle.")
+    save_rows(new_rows)
+    print(f"💾 Cycle {cycle} saved {len(new_rows)} new rows. Total: {len(seen_ids)}")
+    git_push()
 
     # --- 5. Commit at 9 minutes ---
     elapsed = time.time() - start_time
