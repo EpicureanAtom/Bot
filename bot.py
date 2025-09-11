@@ -1,100 +1,124 @@
 import praw
+import requests
 import csv
 import os
 import time
-import requests
+import subprocess
+from datetime import datetime
 
-# Reddit auth (PRAW)
+CSV_FILE = "subreddit_refs.csv"
+
+# --------------------------
+# File helpers
+# --------------------------
+def save_rows(rows):
+    file_exists = os.path.isfile(CSV_FILE)
+    with open(CSV_FILE, "a", newline="", encoding="utf-8") as f:
+        writer = csv.writer(f)
+        if not file_exists:
+            writer.writerow(["id", "subreddit", "title", "created_utc"])
+        writer.writerows(rows)
+
+def load_existing():
+    if not os.path.exists(CSV_FILE):
+        return set(), None
+    ids = set()
+    oldest = None
+    with open(CSV_FILE, "r", encoding="utf-8") as f:
+        reader = csv.reader(f)
+        next(reader, None)  # skip header
+        for row in reader:
+            ids.add(row[0])
+            ts = int(row[3])
+            if oldest is None or ts < oldest:
+                oldest = ts
+    return ids, oldest
+
+def git_push():
+    try:
+        subprocess.run(["git", "config", "--global", "user.name", "github-actions[bot]"], check=True)
+        subprocess.run(["git", "config", "--global", "user.email", "github-actions[bot]@users.noreply.github.com"], check=True)
+        subprocess.run(["git", "add", CSV_FILE], check=True)
+        subprocess.run(["git", "commit", "-m", "Update subreddit_refs.csv [auto]"], check=True)
+        subprocess.run(["git", "push"], check=True)
+        print("✔ CSV pushed to GitHub")
+    except subprocess.CalledProcessError:
+        print("⚠ Nothing new to commit")
+
+# --------------------------
+# API Setup
+# --------------------------
 reddit = praw.Reddit(
     client_id=os.getenv("CLIENT_ID"),
     client_secret=os.getenv("CLIENT_SECRET"),
     username=os.getenv("USERNAME"),
     password=os.getenv("PASSWORD"),
-    user_agent=os.getenv("USER_AGENT"),
+    user_agent=os.getenv("USER_AGENT")
 )
 
 subreddit = reddit.subreddit("ofcoursethatsasub")
-csv_file = "subreddit_refs.csv"
 
-# --- Load already saved posts ---
-saved_ids = set()
-min_timestamp = None  # track oldest post we've saved
-if os.path.exists(csv_file):
-    with open(csv_file, newline="", encoding="utf-8") as f:
-        reader = csv.reader(f)
-        next(reader, None)
-        for row in reader:
-            saved_ids.add(row[0])
-            ts = int(float(row[3]))
-            if min_timestamp is None or ts < min_timestamp:
-                min_timestamp = ts
+# --------------------------
+# Main logic
+# --------------------------
+seen_ids, oldest_seen = load_existing()
+start_time = time.time()
+print(f"📂 Loaded {len(seen_ids)} existing rows. Oldest seen: {oldest_seen}")
 
-print(f"Loaded {len(saved_ids)} existing posts")
-print(f"Oldest timestamp: {min_timestamp}")
-
-# --- Helper: Save posts to CSV ---
-def save_posts(rows):
-    write_header = not os.path.exists(csv_file)
-    with open(csv_file, "a", newline="", encoding="utf-8") as f:
-        writer = csv.writer(f)
-        if write_header:
-            writer.writerow(["id", "title", "url", "created_utc"])
-        writer.writerows(rows)
-
-# --- Fetch new posts via Reddit API ---
-def fetch_new_posts():
-    new_rows = []
-    for submission in subreddit.new(limit=50):
-        if submission.id not in saved_ids:
-            saved_ids.add(submission.id)
-            new_rows.append([
-                submission.id,
-                submission.title,
-                submission.url,
-                submission.created_utc,
-            ])
-    if new_rows:
-        save_posts(new_rows)
-        print(f"Saved {len(new_rows)} new posts (forward)")
-
-# --- Fetch older posts via Pushshift ---
-def fetch_older_posts():
-    global min_timestamp
-    if min_timestamp is None:
-        return
-    url = (
-        f"https://api.pushshift.io/reddit/submission/search/"
-        f"?subreddit=ofcoursethatsasub&before={min_timestamp}&size=50&sort=desc"
-    )
-    try:
-        resp = requests.get(url, timeout=10)
-        data = resp.json()["data"]
-    except Exception as e:
-        print(f"Pushshift error: {e}")
-        return
-    if not data:
-        print("No older posts found")
-        return
-    rows = []
-    for post in data:
-        pid = post["id"]
-        if pid not in saved_ids:
-            saved_ids.add(pid)
-            rows.append([
-                pid,
-                post.get("title", ""),
-                f"https://reddit.com{post.get('permalink', '')}",
-                post["created_utc"],
-            ])
-            if min_timestamp is None or post["created_utc"] < min_timestamp:
-                min_timestamp = post["created_utc"]
-    if rows:
-        save_posts(rows)
-        print(f"Saved {len(rows)} older posts (backfill)")
-
-# --- Main loop ---
+cycle = 0
 while True:
-    fetch_new_posts()   # get new activity
-    fetch_older_posts() # backfill older history
-    time.sleep(1)       # wait before next cycle
+    cycle += 1
+    new_rows = []
+
+    # --- 1. Fetch new posts via Reddit API ---
+    print(f"\n🔄 Cycle {cycle}: Checking for new posts...")
+    for post in subreddit.new(limit=500):
+        if post.id not in seen_ids:
+            new_rows.append([
+                post.id,
+                post.subreddit.display_name,
+                post.title.replace("\n", " "),
+                int(post.created_utc)
+            ])
+            seen_ids.add(post.id)
+
+    # --- 2. Backfill older posts via Pushshift ---
+    if oldest_seen:
+        print("📉 Backfilling older posts...")
+        url = f"https://api.pushshift.io/reddit/submission/search/?subreddit=ofcoursethatsasub&before={oldest_seen}&size=100&sort=desc"
+        r = requests.get(url, timeout=30)
+        if r.status_code == 200:
+            data = r.json().get("data", [])
+            for d in data:
+                if d["id"] not in seen_ids:
+                    new_rows.append([
+                        d["id"],
+                        d["subreddit"],
+                        d["title"].replace("\n", " "),
+                        int(d["created_utc"])
+                    ])
+                    seen_ids.add(d["id"])
+            if data:
+                oldest_seen = int(data[-1]["created_utc"])
+                print(f"⬅ Oldest now {oldest_seen} ({datetime.utcfromtimestamp(oldest_seen)})")
+
+    # --- 3. Save + commit if new data ---
+    if new_rows:
+        save_rows(new_rows)
+        print(f"💾 Saved {len(new_rows)} new posts. Total now: {len(seen_ids)}")
+        git_push()
+    else:
+        print("✅ No new posts this cycle.")
+
+    # --- 4. Timing ---
+    elapsed = time.time() - start_time
+    if elapsed > 540:  # after ~9 minutes
+        print("⏰ 9 minutes reached → final commit before stopping.")
+        git_push()
+        break
+    if elapsed > 600:  # hard stop at 10 minutes
+        print("🛑 10 minute limit reached.")
+        break
+
+    time.sleep(1)
 
