@@ -7,6 +7,13 @@ import subprocess
 from datetime import datetime
 import re
 
+import subprocess
+
+# Configure Git identity for this runner so subprocess calls work
+subprocess.run(["git", "config", "--global", "user.name", "EpicureanAtom"], check=True)
+subprocess.run(["git", "config", "--global", "user.email", "miloradovicdragutin@gmail.com"], check=True)
+
+
 CSV_FILE = "subreddit_refs.csv"
 FRESH_START = True       # True for a fresh CSV each run
 RUN_LIMIT = 1800         # 30 minutes max
