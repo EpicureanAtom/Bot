@@ -1,16 +1,16 @@
-name: Run Reddit Bot
+name: Continuous Reddit Bot
 
 on:
-  workflow_dispatch:
+  workflow_dispatch:         # manual trigger
   schedule:
-    - cron: "*/30 * * * *"
+    - cron: "*/30 * * * *"  # runs every 30 minutes
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout code
+    - name: Checkout repository
       uses: actions/checkout@v3
 
     - name: Set up Python
@@ -19,9 +19,9 @@ jobs:
         python-version: "3.10"
 
     - name: Install dependencies
-      run: pip install praw requests
+      run: pip install praw
 
-    - name: Run bot (~9 min)
+    - name: Run continuous bot (~9 minutes)
       env:
         CLIENT_ID: ${{ secrets.CLIENT_ID }}
         CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
@@ -43,4 +43,3 @@ jobs:
       with:
         name: subreddit-refs
         path: subreddit_refs.csv
-
