@@ -1,0 +1,50 @@
+name: Continuous Reddit Bot
+
+on:
+  workflow_dispatch:          # manual trigger
+  schedule:
+    - cron: "*/30 * * * *"   # run every 30 minutes
+
+jobs:
+  run-bot:
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v3
+
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.10"
+
+    - name: Install dependencies
+      run: pip install praw requests
+
+    - name: Run bot
+      env:
+        CLIENT_ID: ${{ secrets.CLIENT_ID }}
+        CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
+        USERNAME: ${{ secrets.USERNAME }}
+        PASSWORD: ${{ secrets.PASSWORD }}
+        USER_AGENT: ${{ secrets.USER_AGENT }}
+      run: |
+        timeout 1800 python ./bot.py   # 30 minutes max
+
+    - name: Configure Git for GitHub Actions
+      run: |
+        git config user.name "EpicureanAtom"
+        git config user.email "miloradovicdragutin@gmail.com"
+
+    - name: Commit updated CSV
+      run: |
+        git add subreddit_refs.csv
+        git diff --cached --quiet || git commit -m "Update subreddit_refs.csv [auto]"
+        git pull --rebase --autostash || echo "No remote changes"
+        git push || echo "Push failed (might be no new changes)"
+
+    - name: Upload CSV artifact
+      uses: actions/upload-artifact@v4
+      with:
+        name: subreddit-refs
+        path: subreddit_refs.csv
