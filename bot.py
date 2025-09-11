@@ -8,7 +8,7 @@ from datetime import datetime
 import re
 
 CSV_FILE = "subreddit_refs.csv"
-FRESH_START = False   # set True if you want a new file each run
+FRESH_START = True   # set True if you want a new file each run
 RUN_LIMIT = 1800      # 30 minutes
 CYCLE_TIME = 260      # ~4:20 min cycle so 2 cycles before 9 min commit
 COMMIT_TIME = 540     # commit around 9 minutes
