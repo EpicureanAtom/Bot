@@ -13,9 +13,6 @@ RUN_LIMIT = 1800         # 30 minutes max
 CYCLE_TIME = 260         # ~4:20 min per cycle
 COMMIT_TIME = 540        # force commit at ~9 minutes
 
-# --------------------------
-# File helpers
-# --------------------------
 def load_existing():
     if not os.path.exists(CSV_FILE) or FRESH_START:
         return [], set(), None
@@ -61,9 +58,6 @@ def save_csv(rows):
     except subprocess.CalledProcessError:
         print("⚠ Git push failed, continuing anyway.")
 
-# --------------------------
-# Reddit setup
-# --------------------------
 reddit = praw.Reddit(
     client_id=os.getenv("CLIENT_ID"),
     client_secret=os.getenv("CLIENT_SECRET"),
@@ -75,9 +69,6 @@ reddit = praw.Reddit(
 subreddit = reddit.subreddit("ofcoursethatsasub")
 SUB_PATTERN = re.compile(r"\br/([A-Za-z0-9_]+)\b")
 
-# --------------------------
-# Main loop
-# --------------------------
 rows, seen_ids, oldest_seen = load_existing()
 start_time = time.time()
 committed = False
@@ -105,7 +96,6 @@ while True:
             seen_ids.add(post.id)
             print(f"✅ Found subreddit in post: {post.id}")
 
-        # check comments
         post.comments.replace_more(limit=0)
         for comment in post.comments.list():
             if comment.id in seen_ids:
@@ -119,7 +109,6 @@ while True:
                 seen_ids.add(comment.id)
                 print(f"✅ Found subreddit in comment: {comment.id}")
 
-    # Backfill older posts via Pushshift
     if oldest_seen:
         url = f"https://api.pushshift.io/reddit/submission/search/?subreddit=ofcoursethatsasub&before={oldest_seen}&size=100&sort=desc"
         try:
@@ -143,12 +132,10 @@ while True:
         except Exception as e:
             print(f"⚠ Pushshift failed: {e}")
 
-    # Save every cycle
     rows = new_rows + rows
     save_csv(rows)
     print(f"💾 Cycle {cycle} finished. New rows: {len(new_rows)}. Total rows: {len(rows)}")
 
-    # Force commit at 9 minutes if not yet done
     elapsed = time.time() - start_time
     if not committed and elapsed >= COMMIT_TIME:
         print("⏰ 9 min reached → force commit")
