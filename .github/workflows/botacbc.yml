@@ -1,4 +1,4 @@
-name: Continuous Reddit Bot
+name: Continuous Reddit Bot2
 
 on:
   workflow_dispatch:          # manual trigger
@@ -21,7 +21,7 @@ jobs:
     - name: Install dependencies
       run: pip install praw requests
 
-    - name: Run bot
+    - name: Run botabc
       env:
         CLIENT_ID: ${{ secrets.CLIENT_ID }}
         CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
@@ -38,7 +38,7 @@ jobs:
 
     - name: Commit updated CSV
       run: |
-        git add subreddit_refs.csv
+        git add subreddit_refs2.csv
         git diff --cached --quiet || git commit -m "Update subreddit_refs.csv [auto]"
         git pull --rebase --autostash || echo "No remote changes"
         git push || echo "Push failed (might be no new changes)"
@@ -46,5 +46,5 @@ jobs:
     - name: Upload CSV artifact
       uses: actions/upload-artifact@v4
       with:
-        name: subreddit-refs
-        path: subreddit_refs.csv
+        name: subreddit-refs2
+        path: subreddit_refs2.csv
