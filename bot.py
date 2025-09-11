@@ -10,11 +10,11 @@ from datetime import datetime
 # CONFIG
 # --------------------------
 CSV_FILE = "subreddit_refs.csv"
-RUN_LIMIT = 600   # 10 minutes per workflow run
-COMMIT_TIME = 540 # commit around 9 minutes
+RUN_LIMIT = 600    # 10 minutes total per workflow run
+CYCLE_TIME = 270   # 4:30 minutes per cycle
+COMMIT_TIME = 540  # 9 minutes, force commit
 SUBREDDIT_NAME = "ofcoursethatsasub"
 IGNORE_SUB = "r/ofcoursethatsasub"
-CYCLE_SLEEP = 1   # seconds between cycles
 NEW_POST_LIMIT = 500
 BACKFILL_BATCH = 100
 CONTEXT_CHARS = 100
@@ -23,7 +23,6 @@ CONTEXT_CHARS = 100
 # FILE HELPERS
 # --------------------------
 def save_rows(rows):
-    """Insert new rows at the top of the CSV."""
     if not rows:
         return
     file_exists = os.path.isfile(CSV_FILE)
@@ -31,13 +30,11 @@ def save_rows(rows):
     if file_exists:
         with open(CSV_FILE, "r", encoding="utf-8") as f:
             existing_lines = f.readlines()
-
     header = existing_lines[0] if existing_lines else "id,subreddit,title,body,created_utc,context\n"
     new_lines = [
         ",".join([row[0], row[1], row[2].replace(",", " "), row[3].replace(",", " "),
                   str(row[4]), row[5].replace(",", " ")]) + "\n" for row in rows
     ]
-
     with open(CSV_FILE, "w", encoding="utf-8") as f:
         f.write(header)
         f.writelines(new_lines)
@@ -50,7 +47,7 @@ def load_existing():
     oldest = None
     with open(CSV_FILE, "r", encoding="utf-8") as f:
         reader = csv.reader(f)
-        next(reader, None)  # skip header
+        next(reader, None)
         for row in reader:
             ids.add(row[0])
             ts = int(row[4])
@@ -93,7 +90,6 @@ cycle = 0
 print(f"📂 Loaded {len(seen_ids)} existing rows. Oldest seen: {oldest_seen}")
 
 def extract_mentions(text):
-    """Return list of subreddit mentions excluding the ignored one."""
     mentions = []
     words = text.split()
     for word in words:
@@ -103,9 +99,10 @@ def extract_mentions(text):
 
 while True:
     cycle += 1
+    cycle_start = time.time()
     new_rows = []
 
-    print(f"\n🔄 Cycle {cycle}: Checking for new posts...")
+    print(f"\n🔄 Cycle {cycle}: Checking posts/comments...")
 
     # --- 1. Fetch newest posts ---
     for post in subreddit.new(limit=NEW_POST_LIMIT):
@@ -117,8 +114,6 @@ while True:
             new_rows.append([post.id, f"r/{post.subreddit.display_name}", post.title,
                              post.selftext or "", int(post.created_utc), context])
             seen_ids.add(post.id)
-
-        # --- Fetch comments ---
         post.comments.replace_more(limit=0)
         for comment in post.comments.list():
             if comment.id in seen_ids:
@@ -132,7 +127,6 @@ while True:
 
     # --- 2. Backfill older posts via Pushshift ---
     if oldest_seen:
-        print("📉 Backfilling older posts...")
         url = f"https://api.pushshift.io/reddit/submission/search/?subreddit={SUBREDDIT_NAME}&before={oldest_seen}&size={BACKFILL_BATCH}&sort=desc"
         try:
             r = requests.get(url, timeout=30)
@@ -156,19 +150,23 @@ while True:
     # --- 3. Save + push artifact ---
     save_rows(new_rows)
     if new_rows:
-        print(f"💾 Saved {len(new_rows)} new posts/comments. Total now: {len(seen_ids)}")
+        print(f"💾 Saved {len(new_rows)} new rows. Total now: {len(seen_ids)}")
     git_push()
 
-    # --- 4. Commit after 9 minutes even if nothing new ---
-    elapsed = time.time() - start_time
-    if not committed and elapsed >= COMMIT_TIME:
+    # --- 4. Wait remaining cycle time ---
+    elapsed_cycle = time.time() - cycle_start
+    remaining = CYCLE_TIME - elapsed_cycle
+    if remaining > 0:
+        time.sleep(remaining)
+
+    # --- 5. Commit after 9 minutes even if nothing new ---
+    elapsed_total = time.time() - start_time
+    if not committed and elapsed_total >= COMMIT_TIME:
         print("⏰ 9 minutes reached → committing CSV regardless of new data")
         git_push()
         committed = True
 
-    # --- 5. Stop after 10 minutes ---
-    if elapsed >= RUN_LIMIT:
+    # --- 6. Stop after 10 minutes ---
+    if elapsed_total >= RUN_LIMIT:
         print("🛑 10 minutes reached → exiting")
         break
-
-    time.sleep(CYCLE_SLEEP)
