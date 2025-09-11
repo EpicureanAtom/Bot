@@ -1,73 +1,100 @@
-import os
 import praw
 import csv
+import os
 import time
+import requests
 
-# --- Reddit connection ---
+# Reddit auth (PRAW)
 reddit = praw.Reddit(
-    client_id=os.environ["CLIENT_ID"],
-    client_secret=os.environ["CLIENT_SECRET"],
-    username=os.environ["USERNAME"],
-    password=os.environ["PASSWORD"],
-    user_agent=os.environ["USER_AGENT"],
+    client_id=os.getenv("CLIENT_ID"),
+    client_secret=os.getenv("CLIENT_SECRET"),
+    username=os.getenv("USERNAME"),
+    password=os.getenv("PASSWORD"),
+    user_agent=os.getenv("USER_AGENT"),
 )
 
-subreddit_name = "ofcoursethatsasub"
+subreddit = reddit.subreddit("ofcoursethatsasub")
 csv_file = "subreddit_refs.csv"
 
-# --- Load saved posts ---
+# --- Load already saved posts ---
 saved_ids = set()
+min_timestamp = None  # track oldest post we've saved
 if os.path.exists(csv_file):
-    with open(csv_file, "r", newline="", encoding="utf-8") as f:
+    with open(csv_file, newline="", encoding="utf-8") as f:
         reader = csv.reader(f)
-        header = next(reader, None)
+        next(reader, None)
         for row in reader:
-            if not row or len(row) < 4:
-                continue
             saved_ids.add(row[0])
+            ts = int(float(row[3]))
+            if min_timestamp is None or ts < min_timestamp:
+                min_timestamp = ts
 
-# --- Helper functions ---
-def extract_refs(text):
-    refs = []
-    for word in text.split():
-        if word.startswith("r/") and len(word) > 2:
-            refs.append(word.strip(",.?!"))
-    return refs
+print(f"Loaded {len(saved_ids)} existing posts")
+print(f"Oldest timestamp: {min_timestamp}")
 
-def save_to_csv(rows):
-    existing = {}
-    if os.path.exists(csv_file):
-        with open(csv_file, "r", newline="", encoding="utf-8") as f:
-            reader = csv.reader(f)
-            header = next(reader, None)
-            for row in reader:
-                if not row or len(row) < 4:
-                    continue
-                existing[row[0]] = row
-    for row in rows:
-        existing[row[0]] = row
-    with open(csv_file, "w", newline="", encoding="utf-8") as f:
+# --- Helper: Save posts to CSV ---
+def save_posts(rows):
+    write_header = not os.path.exists(csv_file)
+    with open(csv_file, "a", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
-        writer.writerow(["id", "title", "subreddit_refs", "created_utc"])
-        for row in existing.values():
-            writer.writerow(row)
+        if write_header:
+            writer.writerow(["id", "title", "url", "created_utc"])
+        writer.writerows(rows)
+
+# --- Fetch new posts via Reddit API ---
+def fetch_new_posts():
+    new_rows = []
+    for submission in subreddit.new(limit=50):
+        if submission.id not in saved_ids:
+            saved_ids.add(submission.id)
+            new_rows.append([
+                submission.id,
+                submission.title,
+                submission.url,
+                submission.created_utc,
+            ])
+    if new_rows:
+        save_posts(new_rows)
+        print(f"Saved {len(new_rows)} new posts (forward)")
+
+# --- Fetch older posts via Pushshift ---
+def fetch_older_posts():
+    global min_timestamp
+    if min_timestamp is None:
+        return
+    url = (
+        f"https://api.pushshift.io/reddit/submission/search/"
+        f"?subreddit=ofcoursethatsasub&before={min_timestamp}&size=50&sort=desc"
+    )
+    try:
+        resp = requests.get(url, timeout=10)
+        data = resp.json()["data"]
+    except Exception as e:
+        print(f"Pushshift error: {e}")
+        return
+    if not data:
+        print("No older posts found")
+        return
+    rows = []
+    for post in data:
+        pid = post["id"]
+        if pid not in saved_ids:
+            saved_ids.add(pid)
+            rows.append([
+                pid,
+                post.get("title", ""),
+                f"https://reddit.com{post.get('permalink', '')}",
+                post["created_utc"],
+            ])
+            if min_timestamp is None or post["created_utc"] < min_timestamp:
+                min_timestamp = post["created_utc"]
+    if rows:
+        save_posts(rows)
+        print(f"Saved {len(rows)} older posts (backfill)")
 
 # --- Main loop ---
-print("Bot started: monitoring for new posts...")
-try:
-    subreddit = reddit.subreddit(subreddit_name)
-    for submission in subreddit.stream.submissions(skip_existing=True):
-        if submission.id in saved_ids:
-            continue
+while True:
+    fetch_new_posts()   # get new activity
+    fetch_older_posts() # backfill older history
+    time.sleep(1)       # wait before next cycle
 
-        refs = extract_refs(submission.title + " " + submission.selftext)
-        if refs:
-            row = [submission.id, submission.title, ", ".join(refs), int(submission.created_utc)]
-            save_to_csv([row])
-            saved_ids.add(submission.id)
-            print(f"Saved post {submission.id} with {len(refs)} references.")
-
-        time.sleep(1)  # small pause to avoid rate limits
-
-except KeyboardInterrupt:
-    print("Bot stopped manually.")
