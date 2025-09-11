@@ -19,10 +19,9 @@ jobs:
           python-version: "3.10"
 
       - name: Install dependencies
-        run: |
-          pip install praw requests
+        run: pip install praw requests
 
-      - name: Run bot (~10 minutes, 2 cycles)
+      - name: Run bot (~10 min max)
         env:
           CLIENT_ID: ${{ secrets.CLIENT_ID }}
           CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
@@ -31,14 +30,6 @@ jobs:
           USER_AGENT: ${{ secrets.USER_AGENT }}
         run: |
           timeout 600 python ./bot.py
-
-      - name: Commit updated CSV
-        run: |
-          git config --global user.name "github-actions[bot]"
-          git config --global user.email "github-actions[bot]@users.noreply.github.com"
-          git add subreddit_refs.csv || echo "No CSV changes"
-          git commit -m "Update subreddit_refs.csv [auto]" || echo "Nothing to commit"
-          git push || echo "Push failed"
 
       - name: Upload CSV artifact
         uses: actions/upload-artifact@v4
