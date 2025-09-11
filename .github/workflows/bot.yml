@@ -34,7 +34,7 @@ jobs:
     - name: Commit updated CSV
       run: |
         # Configure Git
-        git config --global user.name EpicureanAtom]
+        git config --global user.name EpicureanAtom
         git config --global user.email miloradovicdragutin@gmail.com
         
         # Add CSV
