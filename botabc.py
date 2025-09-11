@@ -6,7 +6,7 @@ from datetime import datetime
 import re
 
 CSV_FILE = "subreddit_refs2.csv"
-FRESH_START = True      # start fresh or continue
+FRESH_START = False      # start fresh or continue
 RUN_LIMIT = 1800        # total run time in seconds (30 min)
 CYCLE_TIME = 260        # ~4:20 per cycle
 
