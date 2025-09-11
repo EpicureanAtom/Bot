@@ -1,45 +1,42 @@
 name: Continuous Reddit Bot
 
 on:
-  workflow_dispatch:         # manual trigger
+  workflow_dispatch:         # allow manual runs
   schedule:
-    - cron: "*/30 * * * *"  # runs every 30 minutes
+    - cron: "*/30 * * * *"   # run every 30 minutes (optional)
 
 jobs:
   run-bot:
     runs-on: ubuntu-latest
 
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v3
+      # 1️⃣ Checkout repository
+      - name: Checkout repository
+        uses: actions/checkout@v3
 
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: "3.10"
+      # 2️⃣ Set up Python
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.10"
 
-    - name: Install dependencies
-      run: pip install praw
+      # 3️⃣ Install dependencies
+      - name: Install dependencies
+        run: pip install praw requests
 
-    - name: Run continuous bot (~9 minutes)
-      env:
-        CLIENT_ID: ${{ secrets.CLIENT_ID }}
-        CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
-        USERNAME: ${{ secrets.USERNAME }}
-        PASSWORD: ${{ secrets.PASSWORD }}
-        USER_AGENT: ${{ secrets.USER_AGENT }}
-      run: timeout 600 python ./bot.py
+      # 4️⃣ Run bot continuously
+      - name: Run bot
+        env:
+          CLIENT_ID: ${{ secrets.CLIENT_ID }}
+          CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
+          USERNAME: ${{ secrets.USERNAME }}
+          PASSWORD: ${{ secrets.PASSWORD }}
+          USER_AGENT: ${{ secrets.USER_AGENT }}
+        run: python ./bot.py
 
-    - name: Commit updated CSV
-      run: |
-        git config --global user.name "github-actions[bot]"
-        git config --global user.email "github-actions[bot]@users.noreply.github.com"
-        git add subreddit_refs.csv
-        git commit -m "Update subreddit_refs.csv [skip ci]" || echo "No changes to commit"
-        git push
-
-    - name: Upload CSV artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: subreddit-refs
-        path: subreddit_refs.csv
+      # 5️⃣ Upload CSV artifact
+      - name: Upload CSV artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: subreddit-refs
+          path: subreddit_reffs.csv
