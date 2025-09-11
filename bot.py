@@ -1,38 +1,42 @@
-import os
-import re
-import csv
-import time
 import praw
+import requests
+import csv
+import os
+import time
 import subprocess
+from datetime import datetime
+import re
 
 CSV_FILE = "subreddit_refs.csv"
-FRESH_START = True    # set to True to overwrite and start from scratch
-CYCLE_TIME = 300      # each cycle = 5 minutes
-RUN_TIME = 1800       # full run = 30 minutes
+FRESH_START = False   # set True if you want a new file each run
+RUN_LIMIT = 1800      # 30 minutes
+CYCLE_TIME = 260      # ~4:20 min cycle so 2 cycles before 9 min commit
+COMMIT_TIME = 540     # commit around 9 minutes
 
-
+# --------------------------
+# File helpers
+# --------------------------
 def load_existing():
-    """Load existing data and ensure CSV structure has 6 columns."""
-    seen_ids = set()
-    rows = []
-
-    if os.path.exists(CSV_FILE) and not FRESH_START:
-        with open(CSV_FILE, "r", encoding="utf-8") as f:
-            reader = csv.reader(f)
-            header = next(reader, None)
-
-            for row in reader:
-                # pad missing columns
-                while len(row) < 6:
-                    row.append("")
-                seen_ids.add(row[0])
-                rows.append(row)
-
-    return seen_ids, rows
+    if not os.path.exists(CSV_FILE) or FRESH_START:
+        return [], set(), None
+    rows, ids = [], set()
+    oldest = None
+    with open(CSV_FILE, "r", encoding="utf-8") as f:
+        reader = csv.reader(f)
+        next(reader, None)
+        for row in reader:
+            if len(row) < 6:
+                continue
+            rows.append(row)
+            ids.add(row[0])
+            ts = int(row[5])
+            if oldest is None or ts < oldest:
+                oldest = ts
+    return rows, ids, oldest
 
 
 def save_csv(rows):
-    """Save current rows to CSV and commit/push changes."""
+    """Save current rows to CSV and commit/push changes safely."""
     with open(CSV_FILE, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
         writer.writerow(
@@ -40,96 +44,144 @@ def save_csv(rows):
         )
         writer.writerows(rows)
 
-    # Commit to GitHub
-    subprocess.run(["git", "add", CSV_FILE])
-    subprocess.run(["git", "commit", "-m", "Cycle update [auto]"], check=False)
-    subprocess.run(["git", "pull", "--rebase"], check=False)  # avoid rejected push
-    subprocess.run(["git", "push", "origin", "main"], check=False)
+    try:
+        subprocess.run(["git", "add", CSV_FILE], check=True)
+        subprocess.run(
+            ["git", "commit", "-m", "Cycle update [auto]"], check=True
+        )
+    except subprocess.CalledProcessError:
+        print("⚠ Nothing new to commit, skipping commit.")
+
+    try:
+        subprocess.run(["git", "pull", "--rebase"], check=True)
+    except subprocess.CalledProcessError:
+        print("⚠ Git pull failed, continuing anyway.")
+
+    try:
+        subprocess.run(["git", "push", "origin", "main"], check=True)
+    except subprocess.CalledProcessError:
+        print("⚠ Git push failed, continuing anyway.")
 
 
-def extract_subreddit_mentions(text):
-    """Find subreddit mentions like r/example."""
-    return set(re.findall(r"r/[A-Za-z0-9_]+", text))
+# --------------------------
+# Reddit setup
+# --------------------------
+reddit = praw.Reddit(
+    client_id=os.getenv("CLIENT_ID"),
+    client_secret=os.getenv("CLIENT_SECRET"),
+    username=os.getenv("USERNAME"),
+    password=os.getenv("PASSWORD"),
+    user_agent=os.getenv("USER_AGENT"),
+)
 
+subreddit = reddit.subreddit("ofcoursethatsasub")
 
-def run_bot():
-    reddit = praw.Reddit(
-        client_id=os.getenv("REDDIT_CLIENT_ID"),
-        client_secret=os.getenv("REDDIT_CLIENT_SECRET"),
-        user_agent="bot:v1.0 (by u/yourusername)",
-    )
+# regex to match subreddit mentions
+SUB_PATTERN = re.compile(r"\br/([A-Za-z0-9_]+)\b")
 
-    seen_ids, rows = load_existing()
-    start_time = time.time()
+# --------------------------
+# Main loop
+# --------------------------
+rows, seen_ids, oldest_seen = load_existing()
+start_time = time.time()
+committed = False
+cycle = 0
 
-    while time.time() - start_time < RUN_TIME:
-        cycle_start = time.time()
-        subreddit = reddit.subreddit("OfCourseThatsASub")
+print(f"📂 Loaded {len(seen_ids)} posts. Oldest seen: {oldest_seen}")
 
-        # scan new posts
-        for post in subreddit.new(limit=100):
-            if post.id in seen_ids:
-                continue
+while True:
+    cycle += 1
+    new_rows = []
 
-            mentions = extract_subreddit_mentions(
-                (post.title or "") + " " + (post.selftext or "")
-            )
+    print(f"\n🔄 Cycle {cycle}: Checking new posts...")
+    for post in subreddit.new(limit=100):
+        if post.id in seen_ids:
+            continue
 
-            # skip if only r/ofcoursethatsasub is mentioned
-            mentions = {m for m in mentions if m.lower() != "r/ofcoursethatsasub"}
-            if not mentions:
-                continue
+        # check title + selftext for subreddit mentions
+        text = f"{post.title}\n{post.selftext or ''}"
+        matches = SUB_PATTERN.findall(text)
+        valid = [m for m in matches if m.lower() != "ofcoursethatsasub"]
 
-            for m in mentions:
-                rows.append(
-                    [
-                        post.id,
-                        "post",
-                        (post.title or post.selftext)[:80],
-                        m,
-                        str(post.author),
-                        int(post.created_utc),
-                    ]
-                )
-
+        if valid:
+            context = text[:200].replace("\n", " ")
+            new_rows.append([
+                post.id,
+                "post",
+                context,
+                f"r/{post.subreddit.display_name}",
+                str(post.author),
+                int(post.created_utc),
+            ])
             seen_ids.add(post.id)
 
-            # check comments too
-            post.comments.replace_more(limit=0)
-            for c in post.comments.list():
-                cid = f"{post.id}_{c.id}"
-                if cid in seen_ids:
-                    continue
+        # check comments
+        post.comments.replace_more(limit=0)
+        for comment in post.comments.list():
+            if comment.id in seen_ids:
+                continue
+            matches = SUB_PATTERN.findall(comment.body)
+            valid = [m for m in matches if m.lower() != "ofcoursethatsasub"]
+            if valid:
+                context = comment.body[:200].replace("\n", " ")
+                new_rows.append([
+                    comment.id,
+                    "comment",
+                    context,
+                    f"r/{post.subreddit.display_name}",
+                    str(comment.author),
+                    int(comment.created_utc),
+                ])
+                seen_ids.add(comment.id)
 
-                c_mentions = extract_subreddit_mentions(c.body)
-                c_mentions = {m for m in c_mentions if m.lower() != "r/ofcoursethatsasub"}
-                if not c_mentions:
-                    continue
+    # backfill older posts with Pushshift
+    if oldest_seen:
+        url = f"https://api.pushshift.io/reddit/submission/search/?subreddit=ofcoursethatsasub&before={oldest_seen}&size=50&sort=desc"
+        try:
+            r = requests.get(url, timeout=30)
+            if r.status_code == 200:
+                data = r.json().get("data", [])
+                for d in data:
+                    if d["id"] in seen_ids:
+                        continue
+                    text = f"{d.get('title','')}\n{d.get('selftext','')}"
+                    matches = SUB_PATTERN.findall(text)
+                    valid = [m for m in matches if m.lower() != "ofcoursethatsasub"]
+                    if valid:
+                        context = text[:200].replace("\n", " ")
+                        new_rows.append([
+                            d["id"],
+                            "post",
+                            context,
+                            f"r/{d['subreddit']}",
+                            d.get("author"),
+                            int(d["created_utc"]),
+                        ])
+                        seen_ids.add(d["id"])
+                if data:
+                    oldest_seen = int(data[-1]["created_utc"])
+                    print(f"⬅ Oldest now {oldest_seen} ({datetime.utcfromtimestamp(oldest_seen)})")
+        except Exception as e:
+            print(f"⚠ Pushshift failed: {e}")
 
-                for m in c_mentions:
-                    rows.append(
-                        [
-                            cid,
-                            "comment",
-                            c.body[:80],
-                            m,
-                            str(c.author),
-                            int(c.created_utc),
-                        ]
-                    )
-
-                seen_ids.add(cid)
-
-        # save & push after each cycle
+    # save + commit
+    if new_rows:
+        rows = new_rows + rows
         save_csv(rows)
+        print(f"💾 Saved {len(new_rows)} new rows. Total: {len(rows)}")
+    else:
+        print("✅ No new matches this cycle.")
+        # still commit at 9 min
+        elapsed = time.time() - start_time
+        if not committed and elapsed >= COMMIT_TIME:
+            print("⏰ 9 min reached → force commit")
+            save_csv(rows)
+            committed = True
 
-        elapsed = time.time() - cycle_start
-        if elapsed < CYCLE_TIME:
-            time.sleep(CYCLE_TIME - elapsed)
+    elapsed = time.time() - start_time
+    if elapsed >= RUN_LIMIT:
+        print("🛑 Time limit reached. Final save + exit.")
+        save_csv(rows)
+        break
 
-    # final save
-    save_csv(rows)
-
-
-if __name__ == "__main__":
-    run_bot()
+    time.sleep(CYCLE_TIME)
