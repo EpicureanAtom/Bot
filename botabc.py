@@ -2,17 +2,18 @@ import requests
 import csv
 import os
 import time
+import subprocess
 from datetime import datetime
 import re
 
 CSV_FILE = "subreddit_refs2.csv"
-FRESH_START = False       # start fresh or continue from existing CSV
-CHUNK_SIZE = 50           # number of posts per request
-SLEEP_BETWEEN_CHUNKS = 2  # seconds between requests
-MAX_RETRIES = 5           # retries for failed requests
+FRESH_START = False
+CHUNK_SIZE = 50
+SLEEP_BETWEEN_CHUNKS = 2
+MAX_RETRIES = 5
 
 SUBREDDIT_NAME = "ofcoursethatsasub"
-SUB_PATTERN = re.compile(r"\br/([A-Za-z0-9_]+)\b")  # regex for subreddit mentions
+SUB_PATTERN = re.compile(r"\br/([A-Za-z0-9_]+)\b")
 
 # --------------------------
 # File helpers
@@ -24,7 +25,7 @@ def load_existing():
     oldest = None
     with open(CSV_FILE, "r", encoding="utf-8") as f:
         reader = csv.reader(f)
-        next(reader, None)  # skip header
+        next(reader, None)
         for row in reader:
             if len(row) < 6:
                 continue
@@ -44,6 +45,21 @@ def save_csv(rows):
         writer.writerow(["post_id", "type", "context", "subreddit", "author", "timestamp"])
         writer.writerows(rows)
 
+def commit_push_csv():
+    """Commit and push CSV to GitHub if there are changes."""
+    try:
+        subprocess.run(["git", "add", CSV_FILE], check=True)
+        result = subprocess.run(["git", "diff", "--cached", "--quiet"])
+        if result.returncode != 0:
+            subprocess.run(["git", "commit", "-m", "Update subreddit_refs2.csv [auto]"], check=True)
+            subprocess.run(["git", "pull", "--rebase", "--autostash"], check=True)
+            subprocess.run(["git", "push"], check=True)
+            print("💾 CSV committed and pushed")
+        else:
+            print("✅ No new changes to commit")
+    except subprocess.CalledProcessError as e:
+        print(f"⚠ Git operation failed: {e}")
+
 # --------------------------
 # Pushshift fetch
 # --------------------------
@@ -60,7 +76,7 @@ def fetch_posts(before_timestamp):
         except Exception as e:
             print(f"⚠ Pushshift request failed: {e}")
         retries += 1
-        time.sleep(2 ** retries)  # exponential backoff
+        time.sleep(2 ** retries)
     return []
 
 # --------------------------
@@ -79,6 +95,7 @@ while True:
     if not data:
         print("✅ No more posts returned. Backfill complete.")
         save_csv(rows)
+        commit_push_csv()
         break
 
     new_rows = []
@@ -104,6 +121,7 @@ while True:
         rows = new_rows + rows
         save_csv(rows)
         print(f"💾 Saved {len(new_rows)} new rows. Total rows: {len(rows)}")
+        commit_push_csv()  # <-- commit after every chunk
     else:
         print("⚠ No new valid matches this chunk.")
 
