@@ -1,9 +1,9 @@
 name: Continuous Reddit Bot
 
 on:
-  workflow_dispatch:
+  workflow_dispatch:         # manual trigger
   schedule:
-    - cron: "*/30 * * * *"   # runs every 30 minutes
+    - cron: "*/30 * * * *"   # every 30 minutes
 
 jobs:
   run-bot:
@@ -21,23 +21,22 @@ jobs:
     - name: Install dependencies
       run: pip install praw requests
 
-    - name: Run bot (max 10 minutes)
+    - name: Run bot (~10 minutes)
       env:
         CLIENT_ID: ${{ secrets.CLIENT_ID }}
         CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
         USERNAME: ${{ secrets.USERNAME }}
         PASSWORD: ${{ secrets.PASSWORD }}
         USER_AGENT: ${{ secrets.USER_AGENT }}
-      run: |
-        timeout 600 python ./bot.py
+      run: timeout 600 python ./bot.py
 
-    - name: Commit updated CSV (after 9 minutes)
+    - name: Commit updated CSV
       run: |
         git config --global user.name "github-actions[bot]"
         git config --global user.email "github-actions[bot]@users.noreply.github.com"
         git add subreddit_refs.csv
-        git commit -m "Update subreddit_refs.csv [auto]" || echo "No changes to commit"
-        git push || echo "Push failed, possibly no new changes"
+        git commit -m "Update subreddit_refs.csv [skip ci]" || echo "No changes to commit"
+        git push || echo "Push failed"
 
     - name: Upload CSV artifact
       uses: actions/upload-artifact@v4
