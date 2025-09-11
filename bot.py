@@ -10,7 +10,7 @@ from datetime import datetime
 # Config
 # --------------------------
 CSV_FILE = "subreddit_refs.csv"    # main CSV
-FRESH_START = False                # True to start a new CSV
+FRESH_START = True                # True to start a new CSV
 RUN_LIMIT = 600                    # max 10 minutes
 COMMIT_TIME = 540                  # commit around 9 minutes
 CYCLE_LIMIT = 270                  # ~4.5 minutes per cycle
