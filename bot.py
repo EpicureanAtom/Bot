@@ -6,7 +6,7 @@ import time
 import subprocess
 from datetime import datetime
 
-CSV_FILE = "subreddit_reffss.csv"
+CSV_FILE = "subreddit_reffs.csv"  # <- new file for fresh start
 RUN_LIMIT = 600   # 10 minutes
 COMMIT_TIME = 540 # commit around 9 minutes
 
@@ -55,7 +55,7 @@ def git_push():
         subprocess.run(["git", "config", "--global", "user.name", "github-actions[bot]"], check=True)
         subprocess.run(["git", "config", "--global", "user.email", "github-actions[bot]@users.noreply.github.com"], check=True)
         subprocess.run(["git", "add", CSV_FILE], check=True)
-        subprocess.run(["git", "commit", "-m", "Update subreddit_refs.csv [auto]"], check=True)
+        subprocess.run(["git", "commit", "-m", "Update subreddit_reffs.csv [auto]"], check=True)
         subprocess.run(["git", "push"], check=True)
         print("✔ CSV pushed to GitHub")
     except subprocess.CalledProcessError:
@@ -133,14 +133,15 @@ while True:
 
     # --- 4. Timing & limits ---
     elapsed = time.time() - start_time
-    if not committed and elapsed >= 540:  # ~9 minutes
+    if not committed and elapsed >= COMMIT_TIME:  # ~9 minutes
         print("⏰ 9 minutes reached → final commit before stopping.")
         git_push()
         committed = True
-    if elapsed >= RUN_LIMIT:
+    if elapsed >= RUN_LIMIT:  # 10 minutes max
         if not committed:
             git_push()
         print("🛑 10 minute limit reached. Exiting.")
         break
 
     time.sleep(1)
+    
