@@ -12,9 +12,6 @@ COMMIT_TIME = 540  # commit at ~9 minutes
 CYCLE_LIMIT = 500  # number of posts per cycle
 IGNORE_SUB = "ofcoursethatsasub"
 
-# --------------------------
-# File helpers
-# --------------------------
 def load_existing():
     """Load existing CSV, fix rows with missing columns, and get set of seen IDs and oldest timestamp."""
     if not os.path.exists(CSV_FILE):
