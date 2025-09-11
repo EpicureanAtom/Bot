@@ -9,18 +9,17 @@ from datetime import datetime
 # --------------------------
 # Configuration
 # --------------------------
-CSV_FILE = "subreddit_refs.csv"    # Change to start fresh
+CSV_FILE = "subreddit_refs.csv"
 SUBREDDIT_NAME = "ofcoursethatsasub"
-RUN_LIMIT = 600       # total runtime in seconds (10 min)
-COMMIT_TIME = 540     # 9 min, when CSV is committed
+RUN_LIMIT = 600       # 10 minutes total
+COMMIT_TIME = 540     # 9 minutes, force commit
 CYCLE_DURATION = 269  # 4 min 29 sec per cycle
 BACKFILL_SIZE = 100   # posts per batch for Pushshift
+FRESH_START = True    # start from scratch if True
 
 # --------------------------
 # Optional: Start fresh
 # --------------------------
-FRESH_START = True  # set to True to delete old CSV and start from scratch
-
 if FRESH_START and os.path.exists(CSV_FILE):
     backup_name = CSV_FILE.replace(".csv", f"_backup_{int(time.time())}.csv")
     os.rename(CSV_FILE, backup_name)
@@ -33,7 +32,7 @@ def extract_mentions_with_context(text):
     mentions = []
     snippets = []
     for word in text.split():
-        if word.startswith("r/") and word.lower() != "r/ofcoursethatsasub":
+        if word.startswith("r/") and word.lower() != f"r/{SUBREDDIT_NAME}".lower():
             mentions.append(word)
             start = max(0, text.find(word)-20)
             end = min(len(text), text.find(word)+20)
@@ -44,15 +43,12 @@ def save_rows(rows):
     if not rows:
         return
     file_exists = os.path.isfile(CSV_FILE)
-    
     existing_lines = []
     if file_exists:
         with open(CSV_FILE, "r", encoding="utf-8") as f:
             existing_lines = f.readlines()
-    
     header = existing_lines[0] if existing_lines else "id,type,subreddit,context,created_utc,mentions\n"
     new_lines = [",".join([row[0], row[1], row[2], row[3].replace(",", " "), str(row[4]), " ".join(row[5])]) + "\n" for row in rows]
-    
     with open(CSV_FILE, "w", encoding="utf-8") as f:
         f.write(header)
         f.writelines(new_lines)
@@ -167,16 +163,23 @@ while True:
     # --- 4. Save rows ---
     save_rows(new_rows)
     print(f"💾 Cycle {cycle} saved {len(new_rows)} new rows. Total: {len(seen_ids)}")
-    git_push()
-
-    # --- 5. Commit at 9 minutes ---
+    
+    # --- 5. Force commit at 9 minutes, even if cycle not finished ---
     elapsed = time.time() - start_time
     if not committed and elapsed >= COMMIT_TIME:
-        print("⏰ 9 minutes reached → committing CSV")
+        print("⏰ 9 minutes reached → committing CSV mid-cycle")
         git_push()
         committed = True
+        # Exit current cycle immediately after commit
+        continue
 
     # --- 6. Wait until cycle duration is complete ---
     cycle_elapsed = time.time() - cycle_start
     if cycle_elapsed < CYCLE_DURATION:
         time.sleep(CYCLE_DURATION - cycle_elapsed)
+
+    # --- 7. Exit after total runtime ---
+    if elapsed >= RUN_LIMIT:
+        print("🛑 10 minute limit reached. Exiting.")
+        break
+
