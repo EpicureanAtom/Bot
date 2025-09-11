@@ -6,7 +6,7 @@ import time
 import subprocess
 from datetime import datetime
 
-CSV_FILE = "subreddit_refs.csv"
+CSV_FILE = "subreddit_reffss.csv"
 RUN_LIMIT = 600   # 10 minutes
 COMMIT_TIME = 540 # commit around 9 minutes
 
