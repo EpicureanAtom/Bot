@@ -15,7 +15,7 @@ subprocess.run(["git", "config", "--global", "user.email", "miloradovicdragutin@
 
 
 CSV_FILE = "subreddit_refs.csv"
-FRESH_START = True       # True for a fresh CSV each run
+FRESH_START = False       # True for a fresh CSV each run
 RUN_LIMIT = 1800         # 30 minutes max
 CYCLE_TIME = 260         # ~4:20 min per cycle
 COMMIT_TIME = 540        # force commit at ~9 minutes
