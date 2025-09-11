@@ -98,7 +98,9 @@ try:
             if post.id in seen_ids:
                 continue
 
-            mentions = re.findall(r"r/\w+", post.title)
+            # Combine title + selftext
+            content = (post.title or "") + " " + (post.selftext or "")
+            mentions = re.findall(r"r/\w+", content)
             mentions = [m for m in mentions if m.lower() != "r/ofcoursethatsasub"]
             if not mentions:
                 continue
@@ -107,7 +109,7 @@ try:
                 post.id,
                 "submission",
                 f"r/{post.subreddit.display_name}",
-                post.title,
+                content,
                 int(post.created_utc),
                 mentions
             ])
@@ -143,7 +145,8 @@ try:
                     for d in data:
                         if d["id"] in seen_ids:
                             continue
-                        mentions = re.findall(r"r/\w+", d["title"])
+                        content = d.get("title", "") + " " + d.get("selftext", "")
+                        mentions = re.findall(r"r/\w+", content)
                         mentions = [m for m in mentions if m.lower() != "r/ofcoursethatsasub"]
                         if not mentions:
                             continue
@@ -151,7 +154,7 @@ try:
                             d["id"],
                             "submission",
                             f"r/{d['subreddit']}",
-                            d["title"],
+                            content,
                             int(d["created_utc"]),
                             mentions
                         ])
@@ -181,3 +184,4 @@ try:
 
 except Exception as e:
     print(f"❌ Script error: {e}")
+
