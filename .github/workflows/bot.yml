@@ -3,7 +3,7 @@ name: Continuous Reddit Bot
 on:
   workflow_dispatch:
   schedule:
-    - cron: "*/30 * * * *"
+    - cron: "*/30 * * * *" # run every 30 minutes
 
 jobs:
   run-bot:
@@ -21,15 +21,14 @@ jobs:
       - name: Install dependencies
         run: pip install praw requests
 
-      - name: Run bot (~10 min max)
+      - name: Run bot (10 min max)
         env:
           CLIENT_ID: ${{ secrets.CLIENT_ID }}
           CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
           USERNAME: ${{ secrets.USERNAME }}
           PASSWORD: ${{ secrets.PASSWORD }}
           USER_AGENT: ${{ secrets.USER_AGENT }}
-        run: |
-          timeout 600 python ./bot.py
+        run: timeout 600 python ./bot.py
 
       - name: Upload CSV artifact
         uses: actions/upload-artifact@v4
