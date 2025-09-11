@@ -17,6 +17,16 @@ CYCLE_DURATION = 269  # 4 min 29 sec per cycle
 BACKFILL_SIZE = 100   # posts per batch for Pushshift
 
 # --------------------------
+# Optional: Start fresh
+# --------------------------
+FRESH_START = True  # set to True to delete old CSV and start from scratch
+
+if FRESH_START and os.path.exists(CSV_FILE):
+    backup_name = CSV_FILE.replace(".csv", f"_backup_{int(time.time())}.csv")
+    os.rename(CSV_FILE, backup_name)
+    print(f"⚠ Existing CSV renamed to {backup_name} → starting fresh")
+
+# --------------------------
 # Helpers
 # --------------------------
 def extract_mentions_with_context(text):
