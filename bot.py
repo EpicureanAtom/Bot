@@ -2,11 +2,12 @@ import praw
 import requests
 import csv
 import os
+import re
 import time
 import subprocess
 from datetime import datetime
 
-CSV_FILE = "subreddit_reffs.csv"  # new file for fresh start
+CSV_FILE = "subreddit_reffs.csv"  # new CSV file for fresh start
 RUN_LIMIT = 600   # 10 minutes
 COMMIT_TIME = 540 # commit around 9 minutes
 
@@ -91,7 +92,12 @@ while True:
     # --- 1. Fetch new posts via Reddit API ---
     print(f"\n🔄 Cycle {cycle}: Checking for new posts...")
     for post in subreddit.new(limit=500):
-        if post.id not in seen_ids and "r/ofcoursethatsasub" not in post.title.lower():
+        if post.id not in seen_ids:
+            # Extract subreddit mentions excluding r/ofcoursethatsasub
+            sub_mentions = re.findall(r"r/\w+", post.title)
+            sub_mentions = [s for s in sub_mentions if s.lower() != "r/ofcoursethatsasub"]
+
+            # Save the post
             new_rows.append([
                 post.id,
                 f"r/{post.subreddit.display_name}",
@@ -109,7 +115,10 @@ while True:
             if r.status_code == 200:
                 data = r.json().get("data", [])
                 for d in data:
-                    if d["id"] not in seen_ids and "r/ofcoursethatsasub" not in d["title"].lower():
+                    if d["id"] not in seen_ids:
+                        sub_mentions = re.findall(r"r/\w+", d["title"])
+                        sub_mentions = [s for s in sub_mentions if s.lower() != "r/ofcoursethatsasub"]
+
                         new_rows.append([
                             d["id"],
                             f"r/{d['subreddit']}",
