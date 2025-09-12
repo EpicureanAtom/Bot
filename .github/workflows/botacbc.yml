@@ -2,8 +2,6 @@ name: Reddit Scraper Auto-Update
 
 on:
   schedule:
-    # Run every 30 minutes
-    - cron: "*/30 * * * *"
   workflow_dispatch:  # Allows manual trigger
 
 jobs:
