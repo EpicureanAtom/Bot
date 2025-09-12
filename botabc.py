@@ -19,10 +19,11 @@ SUB_PATTERN = re.compile(r"\br/([A-Za-z0-9_]+)\b")
 # File helpers
 # --------------------------
 def load_existing():
+    """Load CSV if exists. Returns: rows, seen_ids, newest_timestamp"""
     if not os.path.exists(CSV_FILE) or FRESH_START:
         return [], set(), None
     rows, ids = [], set()
-    oldest = None
+    newest = None
     with open(CSV_FILE, "r", encoding="utf-8") as f:
         reader = csv.reader(f)
         next(reader, None)
@@ -35,9 +36,9 @@ def load_existing():
                 ts = int(row[5])
             except ValueError:
                 ts = None
-            if ts is not None and (oldest is None or ts < oldest):
-                oldest = ts
-    return rows, ids, oldest
+            if ts is not None and (newest is None or ts > newest):
+                newest = ts
+    return rows, ids, newest
 
 def save_csv(rows):
     with open(CSV_FILE, "w", newline="", encoding="utf-8") as f:
@@ -61,10 +62,14 @@ def commit_push_csv():
         print(f"⚠ Git operation failed: {e}")
 
 # --------------------------
-# Pushshift fetch
+# Pushshift fetch (forward crawl)
 # --------------------------
-def fetch_posts(before_timestamp):
-    url = f"https://api.pushshift.io/reddit/submission/search/?subreddit={SUBREDDIT_NAME}&before={before_timestamp}&size={CHUNK_SIZE}&sort=desc"
+def fetch_posts(after_timestamp, until_timestamp):
+    url = (
+        f"https://api.pushshift.io/reddit/submission/search/"
+        f"?subreddit={SUBREDDIT_NAME}&after={after_timestamp}"
+        f"&before={until_timestamp}&size={CHUNK_SIZE}&sort=asc"
+    )
     retries = 0
     while retries < MAX_RETRIES:
         try:
@@ -80,20 +85,22 @@ def fetch_posts(before_timestamp):
     return []
 
 # --------------------------
-# Main loop
+# Main loop (resume forward crawl)
 # --------------------------
-rows, seen_ids, oldest_seen = load_existing()
-if oldest_seen is None:
-    oldest_seen = int(time.time())
+rows, seen_ids, newest_seen = load_existing()
+if newest_seen is None:
+    newest_seen = 0  # start from the beginning
 
-print(f"📂 Loaded {len(seen_ids)} posts. Starting from timestamp: {oldest_seen}")
+end_time = int(time.time())  # cap crawl at "now"
+
+print(f"📂 Loaded {len(seen_ids)} posts. Resuming from {newest_seen} ({datetime.utcfromtimestamp(newest_seen)}), until {end_time}")
 
 while True:
-    print(f"\n🔄 Fetching posts before {oldest_seen} ({datetime.utcfromtimestamp(oldest_seen)})")
-    data = fetch_posts(oldest_seen)
+    print(f"\n🔄 Fetching posts after {newest_seen} ({datetime.utcfromtimestamp(newest_seen)})")
+    data = fetch_posts(newest_seen, end_time)
 
     if not data:
-        print("✅ No more posts returned. Backfill complete.")
+        print("✅ No more posts returned. Forward fill complete.")
         save_csv(rows)
         commit_push_csv()
         break
@@ -118,12 +125,18 @@ while True:
             seen_ids.add(d["id"])
 
     if new_rows:
-        rows = new_rows + rows
+        rows.extend(new_rows)  # append chronologically
         save_csv(rows)
         print(f"💾 Saved {len(new_rows)} new rows. Total rows: {len(rows)}")
-        commit_push_csv()  # <-- commit after every chunk
+        commit_push_csv()
     else:
         print("⚠ No new valid matches this chunk.")
 
-    oldest_seen = int(data[-1]["created_utc"])
+    # Stop condition: if Pushshift repeats the same timestamp
+    latest_in_chunk = int(data[-1]["created_utc"])
+    if latest_in_chunk <= newest_seen:
+        print("🛑 Stopping: timestamp did not advance (likely end of results).")
+        break
+
+    newest_seen = latest_in_chunk
     time.sleep(SLEEP_BETWEEN_CHUNKS)
