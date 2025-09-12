@@ -1,48 +1,47 @@
-name: Continuous Reddit Bot2
+name: Reddit Scraper Auto-Update
 
 on:
-  workflow_dispatch:   # run manually
   schedule:
-    - cron: "*/30 * * * *"  # run every 30 minutes
+    # Run every 30 minutes
+    - cron: "*/30 * * * *"
+  workflow_dispatch:  # Allows manual trigger
 
 jobs:
-  run-bot:
+  run-scraper:
     runs-on: ubuntu-latest
 
+    env:
+      CLIENT_ID: ${{ secrets.CLIENT_ID }}
+      CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
+      USERNAME: ${{ secrets.USERNAME }}
+      PASSWORD: ${{ secrets.PASSWORD }}
+      USER_AGENT: ${{ secrets.USER_AGENT }}
+
     steps:
-    - name: Checkout repository
-      uses: actions/checkout@v4
+      - name: Checkout repository
+        uses: actions/checkout@v3
 
-    - name: Configure Git
-      run: |
-        git config user.name "github-actions[bot]"
-        git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+      - name: Set up Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: "3.11"
 
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: "3.10"
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install praw requests
 
-    - name: Install dependencies
-      run: pip install requests praw
+      - name: Configure Git
+        run: |
+          git config --global user.name "EpicureanAtom"
+          git config --global user.email "miloradovicdragutin@gmail.com"
 
-    - name: Run botabc
-      env:
-        CLIENT_ID: ${{ secrets.CLIENT_ID }}
-        CLIENT_SECRET: ${{ secrets.CLIENT_SECRET }}
-        USERNAME: ${{ secrets.USERNAME }}
-        PASSWORD: ${{ secrets.PASSWORD }}
-        USER_AGENT: ${{ secrets.USER_AGENT }}
-      run: timeout 1800 python ./bot.py
+      - name: Run Reddit scraper
+        run: |
+          python ./bot.py
 
-    - name: Commit updated CSV
-      run: |
-        git add subreddit_refs2.csv
-        git diff --cached --quiet || git commit -m "Update subreddit_refs2.csv [auto]"
-        git push || echo "No new changes to push"
-
-    - name: Upload CSV artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: subreddit-refs2
-        path: subreddit_refs2.csv
+      - name: Commit & Push CSV if updated
+        run: |
+          git add subreddit_refs2.csv
+          git diff --cached --quiet || git commit -m "Update subreddit_refs2.csv [auto]"
+          git push origin main
