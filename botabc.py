@@ -10,11 +10,12 @@ from datetime import datetime
 # --------------------------
 CSV_FILE = "subreddit_refs2.csv"
 SUBREDDIT_NAME = "ofcoursethatsasub"
-CHUNK_SIZE = 100
+CHUNK_SIZE = 50
 SLEEP_BETWEEN_CHUNKS = 2
 MAX_RETRIES = 5
 
-SUB_PATTERN = re.compile(r"\br/([A-Za-z0-9_]+)\b", re.IGNORECASE)
+# Match r/sub or /r/sub, case insensitive
+SUB_PATTERN = re.compile(r"(?:/|r/)([A-Za-z0-9_]+)", re.IGNORECASE)
 
 # --------------------------
 # Helpers
@@ -28,7 +29,8 @@ def load_existing():
             reader = csv.DictReader(f)
             for row in reader:
                 rows.append(row)
-                saved_ids.add(row["post_id"] + "_" + row.get("sub_ref", ""))
+                key = row["post_id"] + "_" + row.get("sub_ref", "")
+                saved_ids.add(key)
                 ts = int(row.get("timestamp", 0))
                 if ts > newest_ts:
                     newest_ts = ts
@@ -50,7 +52,9 @@ def fetch_pushshift(subreddit, after, size=CHUNK_SIZE):
         try:
             r = requests.get(url, timeout=30)
             if r.status_code == 200:
-                return r.json().get("data", [])
+                data = r.json().get("data", [])
+                print(f"🔹 Fetched {len(data)} posts from Pushshift")
+                return data
             else:
                 print(f"⚠ Bad response {r.status_code}, retrying...")
         except Exception as e:
@@ -60,7 +64,6 @@ def fetch_pushshift(subreddit, after, size=CHUNK_SIZE):
     return []
 
 def fetch_comments(post_id, after=None):
-    """Recursively fetch all comments for a post."""
     comments = []
     batch_size = 100
     after_param = after or 0
@@ -71,6 +74,7 @@ def fetch_comments(post_id, after=None):
             f"?link_id={post_id}&after={after_param}&size={batch_size}&sort=asc"
         )
         retries = 0
+        data = []
         while retries < MAX_RETRIES:
             try:
                 r = requests.get(url, timeout=30)
@@ -87,11 +91,15 @@ def fetch_comments(post_id, after=None):
         if not data or len(data) < batch_size:
             break
         after_param = int(data[-1]["created_utc"])
+    print(f"🔹 Fetched {len(comments)} comments for post {post_id}")
     return comments
 
 def find_sub_refs(text):
     matches = SUB_PATTERN.findall(text or "")
-    return [m for m in matches if m.lower() != SUBREDDIT_NAME.lower()]
+    valid = [m for m in matches if m.lower() != SUBREDDIT_NAME.lower()]
+    if valid:
+        print(f"   ✨ Found subreddit references: {valid}")
+    return valid
 
 # --------------------------
 # Main
