@@ -1,174 +1,183 @@
-import os
-import csv
-import time
+import praw
 import requests
-import re
+import csv
+import os
+import time
+import subprocess
 from datetime import datetime
+import re
 
 # --------------------------
-# Config
+# Git configuration
+# --------------------------
+subprocess.run(["git", "config", "--global", "user.name", "EpicureanAtom"], check=True)
+subprocess.run(["git", "config", "--global", "user.email", "miloradovicdragutin@gmail.com"], check=True)
+
+# --------------------------
+# Constants
 # --------------------------
 CSV_FILE = "subreddit_refs2.csv"
-SUBREDDIT_NAME = "ofcoursethatsasub"
-CHUNK_SIZE = 50
-SLEEP_BETWEEN_CHUNKS = 2
-MAX_RETRIES = 5
-
-# Match r/sub or /r/sub, case insensitive
-SUB_PATTERN = re.compile(r"(?:/|r/)([A-Za-z0-9_]+)", re.IGNORECASE)
+FRESH_START = False       # True for fresh CSV
+RUN_LIMIT = 1800          # 30 minutes
+CYCLE_TIME = 260          # ~4:20 minutes per cycle
+COMMIT_TIME = 540         # 9 minutes
 
 # --------------------------
-# Helpers
+# CSV helpers
 # --------------------------
 def load_existing():
-    rows = []
-    saved_ids = set()
-    newest_ts = 0
-    if os.path.exists(CSV_FILE):
-        with open(CSV_FILE, newline="", encoding="utf-8") as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                rows.append(row)
-                key = row["post_id"] + "_" + row.get("sub_ref", "")
-                saved_ids.add(key)
-                ts = int(row.get("timestamp", 0))
-                if ts > newest_ts:
-                    newest_ts = ts
-    return rows, saved_ids, newest_ts
+    if not os.path.exists(CSV_FILE) or FRESH_START:
+        return [], set(), None
+    rows, ids = [], set()
+    oldest = None
+    with open(CSV_FILE, "r", encoding="utf-8") as f:
+        reader = csv.reader(f)
+        next(reader, None)
+        for row in reader:
+            if len(row) < 6:
+                row += [''] * (6 - len(row))
+            rows.append(row)
+            ids.add(row[0])
+            try:
+                ts = int(row[5])
+                if oldest is None or ts < oldest:
+                    oldest = ts
+            except ValueError:
+                continue
+    return rows, ids, oldest
 
-def save_rows(rows):
+def save_csv(rows):
+    """Save CSV and commit/push."""
     with open(CSV_FILE, "w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
-        writer.writerow(["post_id", "type", "context", "subreddit", "author", "timestamp", "sub_ref"])
+        writer.writerow(["post_id", "type", "context", "subreddit", "author", "timestamp"])
         writer.writerows(rows)
 
-def fetch_pushshift(subreddit, after, size=CHUNK_SIZE):
-    url = (
-        f"https://api.pushshift.io/reddit/submission/search/"
-        f"?subreddit={subreddit}&after={after}&size={size}&sort=asc"
-    )
-    retries = 0
-    while retries < MAX_RETRIES:
-        try:
-            r = requests.get(url, timeout=30)
-            if r.status_code == 200:
-                data = r.json().get("data", [])
-                print(f"🔹 Fetched {len(data)} posts from Pushshift")
-                return data
-            else:
-                print(f"⚠ Bad response {r.status_code}, retrying...")
-        except Exception as e:
-            print(f"⚠ Pushshift request failed: {e}")
-        retries += 1
-        time.sleep(2 ** retries)
-    return []
+    try:
+        subprocess.run(["git", "add", CSV_FILE], check=True)
+        subprocess.run(["git", "commit", "-m", "Update subreddit_refs2.csv [auto]"], check=True)
+    except subprocess.CalledProcessError:
+        print("⚠ Nothing new to commit, skipping commit.")
 
-def fetch_comments(post_id, after=None):
-    comments = []
-    batch_size = 100
-    after_param = after or 0
+    try:
+        subprocess.run(["git", "pull", "--rebase", "--autostash"], check=True)
+    except subprocess.CalledProcessError:
+        print("⚠ Git pull failed, continuing anyway.")
 
-    while True:
-        url = (
-            f"https://api.pushshift.io/reddit/comment/search/"
-            f"?link_id={post_id}&after={after_param}&size={batch_size}&sort=asc"
-        )
-        retries = 0
-        data = []
-        while retries < MAX_RETRIES:
-            try:
-                r = requests.get(url, timeout=30)
-                if r.status_code == 200:
-                    data = r.json().get("data", [])
-                    comments.extend(data)
-                    break
-                else:
-                    print(f"⚠ Comment fetch bad response {r.status_code}")
-            except Exception as e:
-                print(f"⚠ Comment fetch error: {e}")
-            retries += 1
-            time.sleep(2 ** retries)
-        if not data or len(data) < batch_size:
-            break
-        after_param = int(data[-1]["created_utc"])
-    print(f"🔹 Fetched {len(comments)} comments for post {post_id}")
-    return comments
-
-def find_sub_refs(text):
-    matches = SUB_PATTERN.findall(text or "")
-    valid = [m for m in matches if m.lower() != SUBREDDIT_NAME.lower()]
-    if valid:
-        print(f"   ✨ Found subreddit references: {valid}")
-    return valid
+    try:
+        subprocess.run(["git", "push", "origin", "main"], check=True)
+    except subprocess.CalledProcessError:
+        print("⚠ Git push failed, continuing anyway")
 
 # --------------------------
-# Main
+# Reddit setup
 # --------------------------
-rows, saved_ids, newest_ts = load_existing()
-if newest_ts == 0:
-    print("📂 No existing CSV, starting from the beginning...")
-else:
-    print(f"📂 Resuming from timestamp {newest_ts} ({datetime.utcfromtimestamp(newest_ts)})")
+reddit = praw.Reddit(
+    client_id=os.getenv("CLIENT_ID"),
+    client_secret=os.getenv("CLIENT_SECRET"),
+    username=os.getenv("USERNAME"),
+    password=os.getenv("PASSWORD"),
+    user_agent=os.getenv("USER_AGENT"),
+)
 
-all_new = 0
+SUB_PATTERN = re.compile(r"\br/([A-Za-z0-9_]+)\b")
+
+# --------------------------
+# Top subreddits helper
+# --------------------------
+def get_top_subreddits(limit=100):
+    top_subs = [sub.display_name for sub in reddit.subreddits.popular(limit=limit)]
+    print(f"🔝 Top {len(top_subs)} subreddits fetched")
+    return top_subs
+
+# --------------------------
+# Pushshift backfill helper
+# --------------------------
+def backfill_subreddit(sub_name, oldest_seen, limit=100):
+    new_rows = []
+    url = f"https://api.pushshift.io/reddit/submission/search/?subreddit={sub_name}&before={oldest_seen}&size={limit}&sort=desc"
+    try:
+        r = requests.get(url, timeout=30)
+        if r.status_code == 200:
+            data = r.json().get("data", [])
+            for d in data:
+                if d["id"] in seen_ids:
+                    continue
+                text = f"{d.get('title','')}\n{d.get('selftext','')}"
+                matches = SUB_PATTERN.findall(text)
+                valid = [m for m in matches if m.lower() != "ofcoursethatsasub"]
+                if valid:
+                    context = text[:200].replace("\n", " ")
+                    new_rows.append([d["id"], "post", context, f"r/{d['subreddit']}",
+                                     d.get("author"), int(d["created_utc"])])
+                    seen_ids.add(d["id"])
+            if data:
+                return new_rows, int(data[-1]["created_utc"])
+    except Exception as e:
+        print(f"⚠ Pushshift failed for {sub_name}: {e}")
+    return new_rows, oldest_seen
+
+# --------------------------
+# Main loop
+# --------------------------
+rows, seen_ids, oldest_seen = load_existing()
+start_time = time.time()
+cycle = 0
+
+top_subreddits = get_top_subreddits(limit=100)
+print(f"📂 Loaded {len(seen_ids)} posts. Oldest seen: {oldest_seen}")
 
 while True:
-    posts = fetch_pushshift(SUBREDDIT_NAME, newest_ts)
-    if not posts:
-        print("✅ No more posts found. Backfill complete.")
+    cycle += 1
+    new_rows = []
+    print(f"\n🔄 Cycle {cycle}: Scanning posts...")
+
+    # --- Scan r/all live ---
+    for post in reddit.subreddit("all").new(limit=100):
+        if post.id in seen_ids:
+            continue
+        text = f"{post.title}\n{post.selftext or ''}"
+        matches = SUB_PATTERN.findall(text)
+        valid = [m for m in matches if m.lower() != "ofcoursethatsasub"]
+        if valid:
+            context = text[:200].replace("\n", " ")
+            new_rows.append([post.id, "post", context, f"r/{post.subreddit.display_name}",
+                             str(post.author), int(post.created_utc)])
+            seen_ids.add(post.id)
+
+        post.comments.replace_more(limit=0)
+        for comment in post.comments.list():
+            if comment.id in seen_ids:
+                continue
+            matches = SUB_PATTERN.findall(comment.body)
+            valid = [m for m in matches if m.lower() != "ofcoursethatsasub"]
+            if valid:
+                context = comment.body[:200].replace("\n", " ")
+                new_rows.append([comment.id, "comment", context, f"r/{post.subreddit.display_name}",
+                                 str(comment.author), int(comment.created_utc)])
+                seen_ids.add(comment.id)
+
+    # --- Backfill older posts ---
+    if oldest_seen:
+        for sub_name in top_subreddits:
+            backfill_rows, oldest_seen = backfill_subreddit(sub_name, oldest_seen)
+            if backfill_rows:
+                new_rows.extend(backfill_rows)
+
+    # --- Save CSV only if new rows ---
+    if new_rows:
+        rows = new_rows + rows
+        save_csv(rows)
+        print(f"💾 Cycle {cycle} finished. New rows: {len(new_rows)}. Total rows: {len(rows)}")
+    else:
+        print(f"💤 Cycle {cycle} finished. No new rows found.")
+
+    # --- Check elapsed time ---
+    elapsed = time.time() - start_time
+    if elapsed >= RUN_LIMIT:
+        print("🛑 Time limit reached. Final save + exit.")
+        if new_rows:
+            save_csv(rows)
         break
 
-    new_rows = []
-    for post in posts:
-        post_id = post["id"]
-        post_text = f"{post.get('title','')}\n{post.get('selftext','')}"
-        post_refs = find_sub_refs(post_text)
-
-        # Add post references
-        for ref in post_refs:
-            key = post_id + "_" + ref.lower()
-            if key not in saved_ids:
-                context = post_text[:200].replace("\n", " ")
-                new_rows.append([
-                    post_id,
-                    "post",
-                    context,
-                    f"r/{SUBREDDIT_NAME}",
-                    post.get("author"),
-                    int(post["created_utc"]),
-                    ref
-                ])
-                saved_ids.add(key)
-                all_new += 1
-
-        # Fetch all comments
-        comments = fetch_comments(post_id)
-        for comment in comments:
-            comment_refs = find_sub_refs(comment.get("body",""))
-            for ref in comment_refs:
-                key = post_id + "_" + ref.lower()
-                if key not in saved_ids:
-                    context = comment.get("body","")[:200].replace("\n"," ")
-                    new_rows.append([
-                        post_id,
-                        "comment",
-                        context,
-                        f"r/{SUBREDDIT_NAME}",
-                        comment.get("author"),
-                        int(comment["created_utc"]),
-                        ref
-                    ])
-                    saved_ids.add(key)
-                    all_new += 1
-
-    if new_rows:
-        rows.extend(new_rows)
-        save_rows(rows)
-        print(f"💾 Saved {len(new_rows)} new rows. Total collected: {len(saved_ids)}")
-    else:
-        print("⚠ No new subreddit mentions found in this chunk.")
-
-    newest_ts = int(posts[-1]["created_utc"])
-    time.sleep(SLEEP_BETWEEN_CHUNKS)
-
-print(f"✅ Finished. Total new references added: {all_new}")
+    time.sleep(CYCLE_TIME)
