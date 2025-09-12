@@ -2,8 +2,6 @@ name: Continuous Reddit Bot
 
 on:
   workflow_dispatch:          # manual trigger
-  schedule:
-    - cron: "*/30 * * * *"   # run every 30 minutes
 
 jobs:
   run-bot:
